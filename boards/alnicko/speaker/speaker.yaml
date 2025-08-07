@@ -1,0 +1,27 @@
+identifier: speaker
+name: RPR001-SCH-001-Rxx Speaker Board
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+ram: 640
+flash: 2048
+supported:
+  - gpio
+  - uart
+  - watchdog
+  - dma
+  - adc
+  - audio
+  - ethernet
+  - wi-fi
+  - cellular_modem
+  - counter
+  - spi
+  - octospi
+  - usb_device
+  - i2c
+  - rtc
+  - usbd
+  - i2s
+vendor: alnicko

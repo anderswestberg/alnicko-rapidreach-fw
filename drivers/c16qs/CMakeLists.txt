@@ -1,0 +1,2 @@
+
+zephyr_library_sources_ifdef(CONFIG_MODEM_CAVLI_C16QS cavli-c16qs.c)

@@ -1,0 +1,14 @@
+menuconfig RPR_MODULE_MICROPHONE
+    bool "Enable Microphone module"
+	  default n
+    help
+      Enable microphone to sound detection.
+
+if RPR_MODULE_MICROPHONE
+config RPR_MODULE_MICRO_LOG_LEVEL
+    int "Microphone module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+endif

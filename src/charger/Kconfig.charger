@@ -1,0 +1,18 @@
+
+menuconfig RPR_MODULE_CHARGER
+    bool "Enable Charger control module"
+    select GPIO
+	  default n
+    help
+      Enable battery charger control.
+      Automatically selects CONFIG_GPIO.
+
+if RPR_MODULE_CHARGER
+config RPR_MODULE_CHARGER_LOG_LEVEL
+    int "Charger module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+endif
+

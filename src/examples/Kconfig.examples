@@ -1,0 +1,116 @@
+
+config EXAMPLES_ENABLE_MAIN_EXAMPLES
+    bool "Enable Main Examples"
+    depends on RPR_NETWORKING
+    help
+      Enable core example modules:
+      - power_supervisor
+      - domain_logic
+      - alnicko_server
+      Requires:
+        CONFIG_RPR_NETWORKING
+
+config EXAMPLES_ENABLE_ALNICKO_SHELL
+    bool "Enable Alnicko Shell Example"
+    depends on RPR_MODULE_HTTP && RPR_NETWORKING && RPR_MODULE_DFU
+    help
+      Enable shell-based interaction with Alnicko server.
+      Requires:
+        CONFIG_RPR_MODULE_HTTP
+        CONFIG_RPR_NETWORKING
+
+if EXAMPLES_ENABLE_MAIN_EXAMPLES || EXAMPLES_ENABLE_ALNICKO_SHELL
+
+config EXAMPLES_ALNICKO_SERVER_LOG_LEVEL
+    int "Alnicko server example log level"
+    range 0 4
+    default 3
+    help
+      Set logging level for example modules:
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+endif # EXAMPLES_ENABLE_MAIN_EXAMPLES || EXAMPLES_ENABLE_ALNICKO_SHELL
+
+if EXAMPLES_ENABLE_MAIN_EXAMPLES 
+
+config EXAMPLES_DOMAIN_LOGIC_LOG_LEVEL
+    int "Domain logic example log level"
+    range 0 4
+    default 3
+    help
+      Set logging level for example modules:
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config EXAMPLES_POWER_SUPERVISOR_LOG_LEVEL
+    int "Power supervisor example log level"
+    range 0 4
+    default 3
+    help
+      Set logging level for example modules:
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config EXAMPLES_POWER_SUPERVISOR_BATTERY_LOW_THRESHOLD
+    int "Battery low threshold (%)"
+    default 20
+    help
+      Device will power off when battery is below this level.
+
+config EXAMPLES_POWER_SUPERVISOR_BATTERY_HIGH_THRESHOLD
+    int "Battery high threshold (%)"
+    default 95
+    help
+      Device starts charging if battery is below this level.
+
+config EXAMPLES_POWER_SUPERVISOR_CHECK_INTERVAL_MS
+    int "Power check interval (ms)"
+    default 60000
+    help
+      Interval for checking battery and power status.
+
+
+config EXAMPLES_DOMAIN_LOGIC_NET_CONNECT_TIMEOUT_MS
+    int "Network connect timeout (ms)"
+    default 30000
+    help
+      Maximum time to wait for network connection on startup.
+
+config EXAMPLES_DOMAIN_LOGIC_TARGET_AUDIO_FILE
+    string "Target audio file to download"
+    default "20-16.opus"
+    help
+      Audio file name to be downloaded during execution.
+
+config EXAMPLES_DOMAIN_LOGIC_AUTO_CONNECT_ON_START
+    bool "Auto-connect to network on start"
+    default y
+    depends on RPR_MODULE_HTTP
+    help
+      If enabled, the example will try to connect to network on boot.
+      Requires:
+        CONFIG_RPR_MODULE_HTTP
+
+config EXAMPLES_DOMAIN_LOGIC_AUTO_DOWNLOAD_AUDIO
+    bool "Auto-download audio file on start"
+    default y
+    help
+      If enabled, the target audio file will be downloaded automatically.
+
+config EXAMPLES_DOMAIN_LOGIC_MAX_PING_LOSSES
+    int "Maximum allowed ping losses before action"
+    default 240
+    help
+      Defines how many ping failures are tolerated.
+
+config EXAMPLES_DOMAIN_LOGIC_AUDIO_MAX_PING_LOSSES
+    int "Maximum allowed ping losses for audio thread before action"
+    default 5
+    help
+      Defines how many ping for audio thread failures are tolerated.
+
+config EXAMPLES_DOMAIN_LOGIC_MIC_INACTIVE_THRESHOLD
+    int "Microphone inactivity threshold during playback"
+    default 6
+    help
+      Number of loop cycles without detected microphone input before triggering a warning.
+
+endif # EXAMPLES_ENABLE_MAIN_EXAMPLES 

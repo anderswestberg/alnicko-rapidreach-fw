@@ -1,0 +1,8 @@
+
+if MODEM
+rsource "c16qs/Kconfig.cavli-c16qs"
+endif # MODEM 
+
+if AUDIO
+rsource "cs43l22/Kconfig.cs43l22"
+endif # AUDIO 

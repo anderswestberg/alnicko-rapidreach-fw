@@ -1,0 +1,1 @@
+zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_CS43L22 cs43l22.c)

@@ -1,0 +1,37 @@
+menuconfig RPR_MODEM
+    bool "Enable Modem support" 
+    depends on RPR_NETWORKING && NET_NATIVE
+    select UART_INTERRUPT_DRIVEN
+    select SERIAL
+    # select POSIX_API
+    select NET_L2_PPP_OPTION_DNS_USE
+    select MODEM
+    select PM_DEVICE
+    select MODEM_CAVLI_C16QS
+    select NET_L2_PPP
+    # select NET_PPP
+    default n
+    help
+      Enable support for the cellular modem C16QS.
+
+if RPR_MODEM
+
+config RPR_MODEM_LOG_LEVEL
+    int "Modem module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_MODEM_TEST_SUPPORT
+    default y if RPR_MODULE_CLI_SHELL_TEST 
+    bool "Enable modem shell testing support"
+    select MODEM_AT_SHELL
+    select PM_DEVICE_SHELL
+    select MODEM_STATS
+    select SHELL
+    help
+      Enable debugging/testing shell commands for modem.
+
+endif # RPR_MODEM
+

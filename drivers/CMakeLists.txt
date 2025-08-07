@@ -1,0 +1,5 @@
+add_subdirectory_ifdef(CONFIG_MODEM_CAVLI_C16QS c16qs)
+add_subdirectory_ifdef(CONFIG_AUDIO_CODEC_CS43L22 cs43l22)
+
+
+

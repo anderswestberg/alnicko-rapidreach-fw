@@ -1,0 +1,544 @@
+/dts-v1/;
+#include <st/h5/stm32h573Xi.dtsi> //STM32H573ZIT6
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+
+#include "stm32h573zitx-pinctrl.dtsi"
+
+/ {
+	model = "Alnicko RPR001-SCH-001-Rxx Speaker Board";
+	compatible = "alnicko,speaker";
+
+	/delete-node/ memory@20000000;
+    /delete-node/ memory@20040000;
+    /delete-node/ memory@20050000;
+
+    sram: memory@20000000 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			reg = <0x20000000 DT_SIZE_K(640)>;
+			zephyr,memory-region = "SRAM";
+	};
+
+	chosen {
+		zephyr,console = &uart8;
+		zephyr,shell-uart = &uart8;
+		zephyr,sram = &sram;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		led_1: led_1 {
+			gpios = <&gpiod 1 GPIO_ACTIVE_HIGH>; //PD1
+			label = "User LD1";
+		};
+		led_2: led_2 {
+			gpios = <&gpiod 0 GPIO_ACTIVE_HIGH>; //PD0
+			label = "User LD2";
+		};
+		led_3: led_3 {
+			gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; //PC11
+			label = "User LD3";
+		};
+		led_4: led_4 {
+			gpios = <&gpioc 12 GPIO_ACTIVE_HIGH>; //PC12
+			label = "User LD4";
+		};
+	};
+
+	aliases { //leds
+		led0 = &led_1;
+		led1 = &led_2;
+		led2 = &led_3;
+		led3 = &led_4;
+	}; 
+
+
+	aliases {
+		watchdog0 = &iwdg;
+		die-temp0 = &die_temp;
+		die-temp1 = &digi_die_temp;
+		volt-sensor0 = &vref;
+		volt-sensor1 = &vbat;
+	};
+};
+
+&clk_hsi48 {
+	status = "okay";
+};
+
+&clk_lse {
+	status = "okay";
+};
+
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(25)>;
+	status = "okay";
+};
+
+&pll {
+	div-m = <5>;
+	mul-n = <96>;
+	div-p = <2>;
+	div-q = <6>;
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(240)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <2>;
+	apb2-prescaler = <1>;
+	apb3-prescaler = <1>;
+};
+
+&uart8 { //shell-uart
+	pinctrl-0 = <&uart8_tx_pe2 &uart8_rx_pe0>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+&aes {
+	status = "okay";
+};
+
+&rng {
+	status = "okay";
+};
+
+&mac {
+	status = "okay";
+	pinctrl-0 = <&eth_rxd0_pc4
+		     &eth_rxd1_pc5
+		     &eth_ref_clk_pa1
+		     &eth_crs_dv_pa7
+		     &eth_tx_en_pa5
+		     &eth_txd0_pb12
+		     &eth_txd1_pb15>;
+		     pinctrl-names = "default";
+};
+
+&mdio {
+	status = "okay";
+	pinctrl-0 = <&eth_mdio_pa2 &eth_mdc_pc1>;
+	pinctrl-names = "default";
+
+	eth_phy: ethernet-phy@0 {
+		compatible = "ethernet-phy";
+		reg = <0x00>;
+		status = "okay";
+	};
+};
+
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        boot_partition: partition@0 {
+            label = "mcuboot";
+            reg = <0x00000000 DT_SIZE_K(64)>;
+        };
+
+        slot0_partition: partition@10000 {
+            label = "image-0";
+            reg = <0x00010000 DT_SIZE_K(1984)>; // 2048K - 64K
+        };
+    };
+};
+
+&rtc {
+	clocks = <&rcc STM32_CLOCK_BUS_APB3 0x00200000>,
+		 <&rcc STM32_SRC_LSE RTC_SEL(1)>;
+	status = "okay";
+};
+
+/ {
+	aliases {
+		rtc = &rtc;
+	};
+};
+
+&iwdg {
+	status = "okay";
+};
+
+&gpdma1 {
+	status = "okay";
+};
+
+&gpdma2 {
+	status = "okay";
+};
+
+&adc1 {
+	clocks = <&rcc STM32_CLOCK_BUS_AHB2 0x00000400>,
+	         <&rcc STM32_SRC_HCLK ADCDAC_SEL(0)>;
+	pinctrl-0 = <&adc1_inp2_pf11>;
+	pinctrl-names = "default";
+	st,adc-clock-source = <2>;
+	st,adc-clock-source = <ASYNC>;
+	st,adc-prescaler = <6>;
+	status = "okay";
+	vref-mv = <3180>;
+};
+
+&spi1 { //SPI Flash 
+	pinctrl-0 = <&spi1_nss_pg10  &spi1_sck_pg11
+		     &spi1_miso_pg9 &spi1_mosi_pd7>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	is25lp_spi: spi-nor-flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		wp-gpios = <&gpiog 13 GPIO_ACTIVE_LOW>;
+		hold-gpios = <&gpiog 12 GPIO_ACTIVE_LOW>;
+		spi-max-frequency = <24000000>;
+		size = <DT_SIZE_M(32)>; /* 32 Mbits */
+		status = "okay";
+		jedec-id = [9D 60 16];
+		has-dpd;
+		t-enter-dpd = <3000>;
+		t-exit-dpd = <3000>;
+
+		partitions {
+            compatible = "fixed-partitions";
+            #address-cells = <1>;
+            #size-cells = <1>;
+
+			storage_partition: partition@0 {
+				label = "storage";
+				reg = <0x00000000 DT_SIZE_K(2112)>; // 2048K + 64K
+			};
+
+			slot1_partition: partition@210000 {
+				label = "image-1";
+				reg = <0x00210000 DT_SIZE_K(1984)>; // 2048K - 64K
+			};
+        };
+	};
+};
+
+zephyr_udc0: &usb {
+	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&die_temp {
+	status = "okay";
+};
+
+&digi_die_temp {
+	status = "okay";
+};
+
+&vref {
+	status = "okay";
+};
+
+&vbat {
+	status = "okay";
+};
+
+/ {
+	vbatt {
+		compatible = "voltage-divider";
+		io-channels = <&adc1 2>; //adc1_inp2_pf11
+		output-ohms = <10000>;
+		full-ohms = <(68000 + 10000)>;
+	};
+};
+
+/  {
+	charger_pins: charger_pins {
+		compatible = "gpio-keys";
+
+		acok_gpios: acok_gpios {
+			gpios = <&gpiog 2 (GPIO_ACTIVE_LOW)>; //PG2
+			label = "ACOK Pin";
+		};
+
+		chgok_gpios: chgok_gpios {
+			gpios = <&gpiod 15 (GPIO_ACTIVE_LOW)>; //PD15
+			label = "CHGOK Pin";
+		};
+		chgen_gpios: chgen_gpios {
+			gpios = <&gpiog 3 (GPIO_ACTIVE_LOW)>; //PG3
+			label = "CHGEN Pin";
+		};
+		input_power_gpios: input_power_gpios {
+			gpios = <&gpiob 1 (GPIO_ACTIVE_HIGH)>; //PB1
+			label = "Input Power Detect Pin";
+		};
+	};
+
+	aliases { // charger_pins
+		acok = &acok_gpios;
+		chgok = &chgok_gpios;
+		chgen = &chgen_gpios;
+		inputp = &input_power_gpios;
+	};
+};
+
+&uart7 {
+	pinctrl-names = "default";
+	status = "okay";
+	
+	current-speed = <460800>;
+	hw-flow-control;
+	pinctrl-0 = <&uart7_tx_pe8
+				&uart7_rx_pe7
+				&uart7_rts_pe9
+				&uart7_cts_pe10>;
+
+	modem: modem {
+		compatible = "cavli,c16qs";
+		status = "okay";
+		mdm-power-gpios = <&gpiog 1 GPIO_ACTIVE_HIGH>; //PG1
+		mdm-reset-gpios = <&gpiog 0 GPIO_ACTIVE_HIGH>; //PG0
+	};
+};
+
+/ {
+	modem_en_pin: modem_en_pin {
+		compatible = "gpio-keys";
+
+		modem_en_gpio: modem_en_gpio {
+			gpios = <&gpioe 14 (GPIO_ACTIVE_HIGH)>; //PE14
+			label = "Enable Modem Power Pin";
+		};
+	};
+	aliases {
+		modem = &modem;
+		modemen = &modem_en_gpio;
+	};
+};
+
+/  {
+	microphone_pin: microphone_pin {
+		compatible = "gpio-keys";
+
+		microphone_gpio: microphone_gpio {
+			gpios = <&gpiod 11 (GPIO_ACTIVE_HIGH)>; //PD11
+			label = "Sound Detect Pin";
+		};
+	};
+
+	aliases { // microphone_pin
+		microphone = &microphone_gpio;
+	};
+};
+
+/  {
+	watchdog_pins: watchdog_pins {
+		compatible = "gpio-keys";
+
+		wdi_gpios: wdi_gpios {
+			gpios = <&gpioe 5 (GPIO_ACTIVE_LOW)>; //PE5
+			label = "Watchdog Input Pin";
+		};
+
+		wden_gpios: wden_gpios {
+			gpios = <&gpioe 6 (GPIO_ACTIVE_LOW)>; //PE6
+
+			label = "Watchdog EN Pin";
+		};
+	};
+
+	aliases { //watchdog_pins
+		wdi = &wdi_gpios;
+		wden = &wden_gpios;
+	};
+};
+
+&pll3 {
+	div-m = <20>;
+	mul-n = <147>;
+	div-q = <3>;
+	
+	div-r = <3>;
+	div-p = <3>;
+
+	fracn = <0>;
+
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&i2s2 {
+    mck-enabled;
+    pinctrl-0 = <&i2s2_ws_pa3 &i2s2_ck_pb10 &i2s2_sdo_pc3 &i2s2_mck_pc6>;
+    pinctrl-names = "default";
+    status = "okay";
+	clocks = <&rcc STM32_CLOCK(APB1, 14U)>,
+             <&rcc STM32_SRC_PLL3_P SPI2_SEL(2)>;
+};
+
+/ {
+    aliases {
+        i2s-codec-tx = &i2s2;
+    };
+};
+
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pb6 &i2c1_sda_pb7>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "okay";
+
+	audio_codec: tas6422dac@6a {
+        compatible = "ti,tas6422dac";
+        reg = <0x6a>;
+        mute-gpios = <&gpiog 7 GPIO_ACTIVE_LOW>; //PG7
+		status = "okay";
+    };
+};
+
+/  {
+	audio_codec_gpio: audio_codec_gpio {
+		compatible = "gpio-keys";
+
+		codec_standby_gpios: codec_standby_gpios {
+			gpios = <&gpiog 8 (GPIO_ACTIVE_HIGH)>; //PG8
+			label = "Audio codec STANDBY Pin";
+		};
+	};
+
+	aliases { //audio_codec_gpio
+		codec-standby-pin = &codec_standby_gpios;
+	};
+};
+
+/ {
+	board_rev_pins: board_rev_pins {
+		compatible = "gpio-keys";
+
+		rev0_gpio: rev0_gpio {
+			gpios = <&gpiod 5 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PD5
+			label = "Board Revision Bit 0";
+		};
+
+		rev1_gpio: rev1_gpio {
+			gpios = <&gpiod 4 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PD4
+			label = "Board Revision Bit 1";
+		};
+
+		rev2_gpio: rev2_gpio {
+			gpios = <&gpiod 3 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PD3
+			label = "Board Revision Bit 2";
+		};
+
+		rev3_gpio: rev3_gpio {
+			gpios = <&gpiod 2 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PD2
+			label = "Board Revision Bit 3";
+		};
+	};
+
+	aliases { //board_rev_pins
+		rev0 = &rev0_gpio;
+		rev1 = &rev1_gpio;
+		rev2 = &rev2_gpio;
+		rev3 = &rev3_gpio;
+	};
+};
+
+
+/ {
+	switches: switches {
+		compatible = "gpio-keys";
+
+		switch0: switch0 {
+			gpios = <&gpioa 10 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; //PA10
+			label = "Switch 0";
+		};
+		switch1: switch1 {
+			gpios = <&gpioa 9 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; //PA9
+			label = "Switch 1";
+		};
+		switch2: switch2 {
+			gpios = <&gpioa 8 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; //PA8
+			label = "Switch 2";
+		};
+		switch3: switch3 {
+			gpios = <&gpioc 7 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; //PC7
+			label = "Switch 3";
+		};
+	};
+
+	aliases { //switches
+		switch0 = &switch0;
+		switch1 = &switch1;
+		switch2 = &switch2;
+		switch3 = &switch3;
+	};
+};
+
+/ {
+	power_sw: power_sw {
+		compatible = "gpio-keys";
+		power_sw_gpio: power_sw_gpio {
+			gpios = <&gpiob 5 GPIO_ACTIVE_HIGH>; //PB5
+			label = "Power Button";
+		};
+
+		poweroff_bt_gpio: poweroff_bt_gpio {
+
+			gpios = <&gpiob 8 GPIO_ACTIVE_HIGH>; //PB8
+			label = "Poweroff Control";
+		};
+	};
+
+
+	aliases { //power
+		power-sw = &power_sw_gpio;
+		poweroff-gpio = &poweroff_bt_gpio;
+	};
+};
+
+/ {
+  chosen {
+    zephyr,wifi = &nrf70_wlan;
+  };
+};
+
+&spi5 { //SPI wifi 
+	pinctrl-0 = <&spi5_nss_pf6  &spi5_sck_pf7
+		     &spi5_miso_pf8 &spi5_mosi_pf9>;
+	pinctrl-names = "default";
+	status = "okay";
+	nrf70: nrf7002@0 {
+		compatible = "nordic,nrf7002-spi";
+		status = "okay";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+
+		iovdd-ctrl-gpios = <&gpiof 0 GPIO_ACTIVE_HIGH>;
+		bucken-gpios = <&gpioe 15 GPIO_ACTIVE_HIGH>;
+		host-irq-gpios = <&gpiof 2 GPIO_ACTIVE_HIGH>;
+
+		wifi-max-tx-pwr-2g-dsss = <21>;
+		wifi-max-tx-pwr-2g-mcs0 = <16>;
+		wifi-max-tx-pwr-2g-mcs7 = <16>;
+
+		wifi-max-tx-pwr-5g-low-mcs0 = <9>;
+		wifi-max-tx-pwr-5g-low-mcs7 = <9>;
+		wifi-max-tx-pwr-5g-mid-mcs0 = <11>;
+		wifi-max-tx-pwr-5g-mid-mcs7 = <11>;
+		wifi-max-tx-pwr-5g-high-mcs0 = <13>;
+		wifi-max-tx-pwr-5g-high-mcs7 = <13>;	
+
+		nrf70_wlan: nrf70_wlan {
+			compatible = "nordic,wlan";
+		};
+	};
+};
+

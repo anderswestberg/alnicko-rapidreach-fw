@@ -1,0 +1,16 @@
+menuconfig RPR_MODULE_RTC
+    bool "Enable RTC module"
+    select RTC
+	  default y
+    help
+      Enable real-time clock (RTC) module.
+      Automatically selects CONFIG_RTC.
+
+if RPR_MODULE_RTC
+config RPR_MODULE_RTC_LOG_LEVEL
+    int "RTC module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+endif

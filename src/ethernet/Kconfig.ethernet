@@ -1,0 +1,23 @@
+menuconfig RPR_ETHERNET
+    bool "Enable Ethernet support"
+    depends on RPR_NETWORKING && NET_NATIVE
+    select NET_L2_ETHERNET
+    select MDIO
+    select NET_ARP
+    select NET_DHCPV4
+    select INIT_STACKS
+    default y if RPR_NETWORKING
+    help
+      Enable Ethernet networking stack and basic DHCP support.
+
+if RPR_ETHERNET
+
+config RPR_ETHERNET_LOG_LEVEL
+    int "Ethernet module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+endif # RPR_ETHERNET
+

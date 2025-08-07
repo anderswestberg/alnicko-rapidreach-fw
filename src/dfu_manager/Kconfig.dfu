@@ -1,0 +1,34 @@
+menuconfig RPR_MODULE_DFU
+    bool "Enable DFU module"
+    select FLASH
+    select STREAM_FLASH
+    select FLASH_MAP
+    select REBOOT
+    select IMG_MANAGER
+    select MPU_ALLOW_FLASH_WRITE
+  	default y if BOOTLOADER_MCUBOOT
+    help
+      Enables firmware update module.
+
+if RPR_MODULE_DFU
+config RPR_MODULE_DFU_LOG_LEVEL
+    int "DFU module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_IMAGE_INTEGRITY_CHECK
+    bool "Enable image integrity check"
+    select IMG_ENABLE_IMAGE_CHECK
+    default y if RPR_HASH_CALCULATION
+    help
+      Enable verification of firmware update image integrity via hash comparison.
+
+config RPR_DFU_SHELL_TEST
+    bool "Enable MCUboot shell commands for DFU testing"
+    select MCUBOOT_SHELL
+    default y if RPR_MODULE_CLI_SHELL_TEST
+    help
+      Enable MCUboot shell support for testing and debugging DFU functionality.
+endif

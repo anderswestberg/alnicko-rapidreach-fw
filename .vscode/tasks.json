@@ -1,0 +1,51 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start ST-LINK GDB Server",
+            "type": "shell",
+            "command": "/opt/st/stm32cubeide*/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.*/tools/bin/ST-LINK_gdbserver",
+            "args": [
+                "-p", "61234",
+                "-l", "1",
+                "-d",
+                "-s",
+                "-cp", "/opt/st/stm32cubeide*/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.*/tools/bin",
+                "-m", "1",
+                "-k"
+            ],
+            "problemMatcher": [],
+            "isBackground": true,  
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+        },
+        {
+            "label": "Generate Firmware Updates",
+            "type": "shell",
+            "command": "python3 ${workspaceFolder}/script/generate_updates.py",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "Fetch Wi-Fi nRF70 blobs",
+            "type": "shell",
+            "command": "west blobs fetch hal_nordic",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        }
+    ]
+}

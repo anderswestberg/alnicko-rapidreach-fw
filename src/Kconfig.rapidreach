@@ -1,0 +1,53 @@
+rsource "led_control/Kconfig.led"
+rsource "switch_module/Kconfig.switch"
+rsource "poweroff/Kconfig.poweroff"
+rsource "charger/Kconfig.charger"
+rsource "dev_info/Kconfig.dev_info"
+rsource "watchdog/Kconfig.watchdog"
+rsource "system_watchdog/Kconfig.sys_watchdog"
+rsource "battery/Kconfig.battery"
+rsource "audio_player/Kconfig.audio"
+rsource "microphone/Kconfig.microphone"
+
+config RPR_NETWORKING
+    bool "Enable RapidReach Networking Stack"
+    select NETWORKING
+    select NET_NATIVE
+    select NET_IPV4
+    select NET_SOCKETS
+    select NET_CONTEXT_RCVTIMEO
+    select DNS_RESOLVER
+    select NET_CONTEXT_NET_PKT_POOL
+    select NET_MGMT
+    select NET_MGMT_EVENT
+    select NET_CONNECTION_MANAGER
+    select TEST_RANDOM_GENERATOR
+    select NET_CONFIG_NEED_IPV4
+    select NET_CONFIG_SETTINGS
+    default n
+    help
+      Enable base networking stack and IPv4 support for RapidReach.
+
+if RPR_NETWORKING
+
+config RPR_NET_SHELL_SUPPORT
+    bool "Enable NET Shell to test"
+    select NET_SHELL
+    depends on RPR_NETWORKING
+    default y if RPR_MODULE_CLI_SHELL_TEST 
+    help
+      Enable networking shell commands.
+
+rsource "ethernet/Kconfig.ethernet"
+rsource "modem/Kconfig.modem"
+rsource "wifi/Kconfig.wifi"
+rsource "http_module/Kconfig.http"
+
+
+endif # RPR_NETWORKING
+
+rsource "cli/Kconfig.cli"
+rsource "file_manager/Kconfig.file"
+
+rsource "dfu_manager/Kconfig.dfu"
+rsource "rtc/Kconfig.rtc"

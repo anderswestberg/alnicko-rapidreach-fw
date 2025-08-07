@@ -1,0 +1,10 @@
+menu "RapidReach Modules"
+rsource "src/Kconfig.rapidreach"
+endmenu
+
+menu "RapidReach Examples Configuration"
+rsource "src/examples/Kconfig.examples"
+endmenu
+
+source "Kconfig.zephyr"
+

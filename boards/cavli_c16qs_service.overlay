@@ -1,0 +1,47 @@
+/*
+ *  cavli_c16qs_service.overlay
+ *
+ * Overlay for configuring UART7 speed and pin settings
+ * used during modem (Cavli C16QS) service setup before switching
+ * to the main firmware with other speed and hardware flow control.
+ *
+ * Usage Instructions:
+ * 1. Add this overlay and the provided .conf file to your build.
+ * 2. By default, the modem supports 115200 baud without hardware flow control.
+ * 3. Compile the project and flash it to the device.
+ * 4. Connect to the console (see README.md for instructions).
+ * 5. Initialize the modem (if not done automatically):
+ *      rapidreach net modem init
+ * 6. Set desired UART speed with:
+ *      modem at AT+CBST=<rate>
+ *    where <rate> is one of:
+ *      600, 1200, 2400, 4800, 9600, 19200, 38400, 57600,
+ *      115200, 230400, 460800, 921600, 1152000, 3000000
+ * 7. After sending the command, the modem will stop responding.
+ *    Power it off:
+ *      rapidreach net modem poweroff
+ */
+&uart7 {
+	current-speed = <115200>; // <----- default modem speed
+	// current-speed = <230400>;
+	// current-speed = <460800>; // <----- current main FW speed
+	// current-speed = <921600>;
+	// current-speed = <1152000>;
+
+	/delete-property/ hw-flow-control;
+};
+ /*
+ * 8. Change the `current-speed` line in this overlay to the new desired speed.
+ *    Comment out `115200` and uncomment the target speed.
+ * 9. Rebuild and flash again.
+ * 10. Once booted, run:
+ *      rapidreach net modem init
+ *      modem at AT+IFC=2,2
+ *    to enable hardware flow control.
+ * 11. Power off the modem again:
+ *      rapidreach net modem poweroff
+ * 12. Remove this overlay and .conf file from the build and proceed with the main firmware.
+ *
+ * Do not modify other lines in this overlay.
+ */
+

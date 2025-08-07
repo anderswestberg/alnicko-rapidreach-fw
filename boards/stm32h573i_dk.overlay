@@ -1,0 +1,326 @@
+
+/ {
+    /delete-node/ memory@20000000;
+    /delete-node/ memory@20040000;
+    /delete-node/ memory@20050000;
+
+    sram: memory@20000000 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			reg = <0x20000000 DT_SIZE_K(640)>;
+			zephyr,memory-region = "SRAM";
+	};
+};
+
+/  {
+	chosen {
+		zephyr,sram = &sram;
+
+	};
+};
+
+/ {
+    vbatt {
+        compatible = "voltage-divider";
+        io-channels = <&adc1 9>; //adc1_inp9_pb0
+        output-ohms = <10000>;
+        full-ohms = <(68000 + 10000)>;
+    };
+};
+
+/  {
+    charger_pins: charger_pins {
+        compatible = "gpio-keys";
+
+        acok_gpios: acok_gpios {
+            gpios = <&gpiob 5 (GPIO_ACTIVE_LOW)>; //D3
+            label = "ACOK Pin";
+        };
+
+        chgok_gpios: chgok_gpios {
+            gpios = <&gpiog 4 (GPIO_ACTIVE_LOW)>; //D4
+            label = "CHGOK Pin";
+        };
+        chgen_gpios: chgen_gpios {
+            gpios = <&gpioh 11 (GPIO_ACTIVE_LOW)>; //D5
+            label = "CHGEN Pin";
+        };
+        input_power_gpios: input_power_gpios {
+            gpios = <&gpioh 10 (GPIO_ACTIVE_LOW)>; //D6
+            label = "Input Power Detect Pin";
+        };
+    };
+
+    aliases {
+        acok = &acok_gpios;
+        chgok = &chgok_gpios;
+        chgen = &chgen_gpios;
+        inputp = &input_power_gpios;
+    };
+};
+
+/ {
+    aliases {
+        modem = &modem;
+    };
+};
+
+&usart3 {
+    current-speed = <115200>;
+    // hw-flow-control;
+    pinctrl-names = "default";
+    status = "okay";
+
+    pinctrl-0 = <&usart3_tx_pb10 &usart3_rx_pb11>;
+
+    modem: modem {
+        compatible = "cavli,c16qs";
+        status = "okay";
+        mdm-power-gpios = <&gpiog 15 GPIO_ACTIVE_LOW>;
+    };
+
+    // esp8266 { // ESP8266 temporary only for Wi-Fi debugging
+    //     compatible = "espressif,esp-at";
+    //     status = "okay";
+    //     external-reset;
+    //     target-speed = <115200>;
+    // };
+};
+
+/ {
+    arduino_header: connector {
+        gpio-map = <>;
+    };
+};
+
+/ {
+    aliases {
+        led1 = &red_led_0;
+        led2 = &orange_led_0;
+        led3 = &green_led_0;
+    };
+};
+
+/  {
+    microphone_pin: microphone_pin {
+        compatible = "gpio-keys";
+
+        microphone_gpio: microphone_gpio {
+            gpios = <&gpioa 8 (GPIO_ACTIVE_HIGH)>; //D9
+            label = "Sound Detect Pin";
+        };
+    };
+
+    aliases {
+        microphone = &microphone_gpio;
+    };
+};
+
+/  {
+    watchdog_pins: watchdog_pins {
+        compatible = "gpio-keys";
+
+        wdi_gpios: wdi_gpios {
+            gpios = <&gpiog 5 (GPIO_ACTIVE_LOW)>; //D7
+            label = "Watchdog Input Pin";
+        };
+
+        wden_gpios: wden_gpios {
+            gpios = <&gpiog 8 (GPIO_ACTIVE_LOW)>; //D8
+            label = "Watchdog EN Pin";
+        };
+    };
+
+    aliases {
+        wdi = &wdi_gpios;
+        wden = &wden_gpios;
+    };
+};
+
+/  {
+    audio_codec_gpio: audio_codec_gpio {
+        compatible = "gpio-keys";
+
+        codec_standby_gpios: codec_standby_gpios {
+            gpios = <&gpioa 3 (GPIO_ACTIVE_LOW)>; //D10
+            label = "Audio codec STANDBY Pin";
+        };
+    };
+
+    aliases {
+        codec-standby-pin = &codec_standby_gpios;
+    };
+};
+
+
+/ {
+    board_rev_pins: board_rev_pins {
+        compatible = "gpio-keys";
+
+        rev0_gpio: rev0_gpio {
+            gpios = <&gpiob 15 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // D11
+            label = "Board Revision Bit 0";
+        };
+
+        rev1_gpio: rev1_gpio {
+            gpios = <&gpioi 2 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // D12
+            label = "Board Revision Bit 1";
+        };
+
+        rev2_gpio: rev2_gpio {
+            gpios = <&gpioi 1 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // D13
+            label = "Board Revision Bit 2";
+        };
+
+        rev3_gpio: rev3_gpio {
+            gpios = <&gpiob 7 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // D14
+            label = "Board Revision Bit 3";
+        };
+    };
+
+    aliases {
+        rev0 = &rev0_gpio;
+        rev1 = &rev1_gpio;
+        rev2 = &rev2_gpio;
+        rev3 = &rev3_gpio;
+    };
+};
+
+
+/ {
+    switches: switches {
+        compatible = "gpio-keys";
+
+        switch0: switch0 {
+            gpios = <&gpioa 4 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A1
+            label = "Switch 0";
+        };
+        switch1: switch1 {
+            gpios = <&gpioa 0 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A2
+            label = "Switch 1";
+        };
+        switch2: switch2 {
+            gpios = <&gpioa 5 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A3
+            label = "Switch 2";
+        };
+        switch3: switch3 {
+            gpios = <&gpioa 6 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A4
+            label = "Switch 3";
+        };
+    };
+
+    aliases {
+        switch0 = &switch0;
+        switch1 = &switch1;
+        switch2 = &switch2;
+        switch3 = &switch3;
+    };
+};
+
+/ {
+    power_sw: power_sw {
+        compatible = "gpio-keys";
+        power_sw_gpio: power_sw_gpio {
+            gpios = <&gpioc 13 GPIO_ACTIVE_LOW>; //PC13
+            label = "Power Button";
+        };
+
+        poweroff_gpio: poweroff_gpio {
+
+            gpios = <&gpiof 12 GPIO_ACTIVE_HIGH>; //A5
+            label = "Poweroff Control";
+        };
+    };
+
+
+    aliases {
+        power-sw = &power_sw_gpio;
+        poweroff-gpio = &poweroff_gpio;
+    };
+
+    sw0 {
+        status = "disabled";
+    };
+};
+
+&flash0 {
+    partitions {
+
+        /delete-node/ partition@0;
+        /delete-node/ partition@10000;
+        /delete-node/ partition@78000;
+        /delete-node/ partition@e0000;
+        /delete-node/ partition@f0000;
+
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        /* Bank 1: 0x08000000 - 0x080FFFFF */
+        boot_partition: partition@0 {
+            label = "mcuboot";
+            reg = <0x00000000 DT_SIZE_K(64)>;
+        };
+
+        slot0_partition: partition@10000 {
+            label = "image-0";
+            reg = <0x00010000 DT_SIZE_K(960)>; // 1024K - 64K
+        };
+
+        /* Bank 2: 0x08100000 - 0x081FFFFF */
+        slot1_partition: partition@100000 {
+            label = "image-1";
+            reg = <0x00100000 DT_SIZE_K(960)>; // 1024K - 64K
+        };
+
+        free_storage_partition: partition@1f0000 {
+            label = "free_storage";
+            reg = <0x001f0000 DT_SIZE_K(64)>;
+        };
+    };
+};
+
+
+&xspi1 {
+    pinctrl-0 = <&octospi1_io0_pb1 &octospi1_io1_pd12
+    &octospi1_io2_pc2 &octospi1_io3_pd13
+    &octospi1_io4_ph2 &octospi1_io5_ph3
+    &octospi1_io6_pg9 &octospi1_io7_pc0
+    &octospi1_clk_pf10 &octospi1_ncs_pg6
+    &octospi1_dqs_pb2>;
+    pinctrl-names = "default";
+
+    status = "okay";
+
+    mx25lm51245: ospi-nor-flash@90000000 {
+        compatible = "st,stm32-xspi-nor";
+        reg = <0x90000000 DT_SIZE_M(64)>; /* 512 Mbits */
+        ospi-max-frequency = <DT_FREQ_M(50)>;
+        spi-bus-width = <XSPI_OCTO_MODE>;
+        data-rate = <XSPI_DTR_TRANSFER>;
+        four-byte-opcodes;
+        status = "okay";
+
+        partitions {
+            compatible = "fixed-partitions";
+            #address-cells = <1>;
+            #size-cells = <1>;
+
+            storage_partition: partition@0 {
+                label = "storage";
+                reg = <0x00000000 DT_SIZE_M(64)>;
+            };
+        };
+    };
+};
+
+&rtc {
+	clocks = <&rcc STM32_CLOCK_BUS_APB3 0x00200000>,
+		 <&rcc STM32_SRC_LSE RTC_SEL(1)>;
+	status = "okay";
+};
+
+/ {
+	aliases {
+		rtc = &rtc;
+	};
+};

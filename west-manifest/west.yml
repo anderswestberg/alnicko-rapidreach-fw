@@ -1,0 +1,46 @@
+manifest:
+  remotes:
+    - name: zephyrproject
+      url-base: https://github.com/zephyrproject-rtos
+    - name: xiph
+      url-base: https://github.com/xiph
+    - name: ncs
+      url-base: https://github.com/nrfconnect
+
+  projects:
+    - name: zephyr
+      repo-path: zephyr
+      remote: zephyrproject
+      revision: v4.0.0
+      clone-depth: 1
+      import:
+        path-prefix: external
+        name-allowlist:
+          - cmsis
+          - cmsis-dsp
+          - picolibc
+          - segger
+          - hal_stm32
+          - mbedtls
+          - littlefs
+          - mcuboot
+          - hal_nordic
+          - hostap
+
+    - name: opus
+      repo-path: opus
+      remote: xiph
+      revision: v1.3.1
+      path: external/modules/lib/opus
+
+    - name: ogg
+      repo-path: ogg
+      remote: xiph
+      revision: v1.3.5
+      path: external/modules/lib/ogg
+
+    - name: opus-tools
+      repo-path: opus-tools
+      remote: xiph
+      revision: v0.2
+      path: external/modules/lib/opus-tools

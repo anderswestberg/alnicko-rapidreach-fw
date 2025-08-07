@@ -1,0 +1,24 @@
+menuconfig RPR_MODULE_DEV_INFO
+    bool "Enable Device Info module"
+    select GPIO
+    select HWINFO
+  	default y
+    help
+      Enable device revision and firmware version reading.
+      Automatically selects CONFIG_GPIO and CONFIG_HWINFO.
+
+if RPR_MODULE_DEV_INFO
+config RPR_MODULE_DEV_INFO_LOG_LEVEL
+    int "Device Info module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_DEVICE_ID_BIN_MAX_SIZE
+    int "Maximum binary size of device ID"
+    default 12
+    help
+      Defines how many bytes to copy from the hardware device ID.
+    
+endif

@@ -1,0 +1,264 @@
+&adc1 {
+    st,adc-prescaler = <2>;
+    status = "okay";
+};
+
+/ {
+    vbatt {
+        compatible = "voltage-divider";
+        io-channels = <&adc1 1>; //adc1_in1_pa1 PA15
+        output-ohms = <10000>;
+        full-ohms = <(68000 + 10000)>;
+    };
+};
+
+/  {
+    charger_pins: charger_pins {
+        compatible = "gpio-keys";
+
+        acok_gpios: acok_gpios {
+            gpios = <&gpiod 15 (GPIO_ACTIVE_LOW)>; //PD15
+            label = "ACOK Pin";
+        };
+
+        chgok_gpios: chgok_gpios {
+            gpios = <&gpiod 13 (GPIO_ACTIVE_LOW)>; //PD13
+            label = "CHGOK Pin";
+        };
+        chgen_gpios: chgen_gpios {
+            gpios = <&gpiod 11 (GPIO_ACTIVE_LOW)>; //PD11
+            label = "CHGEN Pin";
+        };
+        input_power_gpios: input_power_gpios {
+            gpios = <&gpiod 9 (GPIO_ACTIVE_LOW)>; //PD9
+            label = "Input Power Detect Pin";
+        };
+    };
+
+    aliases {
+        acok = &acok_gpios;
+        chgok = &chgok_gpios;
+        chgen = &chgen_gpios;
+        inputp = &input_power_gpios;
+    };
+};
+
+/ {
+    aliases {
+        modem = &modem;
+    };
+};
+
+&usart3 {
+    current-speed = <115200>;
+    // hw-flow-control;
+    pinctrl-names = "default";
+    status = "okay";
+
+    pinctrl-0 = <&usart3_tx_pd8 &usart3_rx_pb11>;
+
+    modem: modem {
+        compatible = "cavli,c16qs";
+        status = "okay";
+        mdm-power-gpios = <&gpiod 8 GPIO_ACTIVE_LOW>; //PD8
+    };
+};
+
+
+/  {
+    microphone_pin: microphone_pin {
+        compatible = "gpio-keys";
+
+        microphone_gpio: microphone_gpio {
+            gpios = <&gpiod 14 (GPIO_ACTIVE_HIGH)>; //PD14
+            label = "Sound Detect Pin";
+        };
+    };
+
+    aliases {
+        microphone = &microphone_gpio;
+    };
+};
+
+/  {
+    watchdog_pins: watchdog_pins {
+        compatible = "gpio-keys";
+
+        wdi_gpios: wdi_gpios {
+            gpios = <&gpiod 12 (GPIO_ACTIVE_LOW)>; //PD12
+            label = "Watchdog Input Pin";
+        };
+
+        wden_gpios: wden_gpios {
+            gpios = <&gpiod 10 (GPIO_ACTIVE_LOW)>; //PD10
+            label = "Watchdog EN Pin";
+        };
+    };
+
+    aliases {
+        wdi = &wdi_gpios;
+        wden = &wden_gpios;
+    };
+};
+
+
+&usart1 {
+    pinctrl-0 = <>;
+    status = "disabled";
+};
+
+
+&dma1 {
+    status = "okay";
+};
+
+&plli2s {
+    /* Minimize audio clock error (with i2s mck-enabled) for all of:
+     * - 22.05kHz / 16b, 24b or 32b
+     * - 44.1kHz  / 16b, 24b or 32b
+     * - 88.2kHz  / 16b or 24b
+     * Note: because the PLLI2S is dependent on the main PLL, the latter
+     *       should not be changed without checking impact on PLLI2S
+     */
+    mul-n = <271>;
+    div-r = <2>;
+    status = "okay";
+};
+
+&i2s3 {
+    mck-enabled;
+    pinctrl-0 = <&i2s3_ws_pa4 &i2s3_ck_pc10 &i2s3_sd_pc12 &i2s3_mck_pc7>;
+    pinctrl-names = "default";
+    clocks = <&rcc STM32_CLOCK(APB1, 15U)>,
+             <&rcc STM32_SRC_PLLI2S_R I2S_SEL(0)>;
+    status = "okay";
+};
+
+&i2c1 {
+    clock-frequency = <I2C_BITRATE_FAST>;
+    pinctrl-0 = <&i2c1_scl_pb6 &i2c1_sda_pb9>;
+    pinctrl-names = "default";
+    status = "okay";
+
+    audio_codec: cs43l22@4a {
+        compatible = "cirrus,cs43l22";
+        reg = <0x4a>;
+        reset-gpios = <&gpiod 4 0>;
+    };
+};
+
+/ {
+    aliases {
+        i2s-codec-tx = &i2s3;
+    };
+};
+
+/  {
+    audio_codec_gpio: audio_codec_gpio {
+        compatible = "gpio-keys";
+
+        codec_standby_gpios: codec_standby_gpios {
+            gpios = <&gpioc 6 (GPIO_ACTIVE_LOW)>;            //PC6
+
+            label = "Audio codec STANDBY Pin";
+        };
+    };
+
+    aliases {
+        codec-standby-pin = &codec_standby_gpios;
+    };
+};
+
+/ {
+    board_rev_pins: board_rev_pins {
+        compatible = "gpio-keys";
+
+        rev0_gpio: rev0_gpio {
+            gpios = <&gpioc 9 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PC9
+            label = "Board Revision Bit 0";
+        };
+
+        rev1_gpio: rev1_gpio {
+            gpios = <&gpioc 8 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PC8
+            label = "Board Revision Bit 1";
+        };
+
+        rev2_gpio: rev2_gpio {
+            gpios = <&gpioa 9 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PA9
+            label = "Board Revision Bit 2";
+        };
+
+        rev3_gpio: rev3_gpio {
+            gpios = <&gpioa 8 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PA8
+            label = "Board Revision Bit 3";
+        };
+    };
+
+    aliases {
+        rev0 = &rev0_gpio;
+        rev1 = &rev1_gpio;
+        rev2 = &rev2_gpio;
+        rev3 = &rev3_gpio;
+    };
+};
+
+
+/ {
+    switches: switches {
+        compatible = "gpio-keys";
+
+        switch0: switch0 {
+            gpios = <&gpioc 11 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //PC11
+            label = "Switch 0";
+        };
+        switch1: switch1 {
+            gpios = <&gpiob 4 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>;    //PB4
+            label = "Switch 1";
+        };
+        switch2: switch2 {
+            gpios = <&gpiod 2 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //PD2
+            label = "Switch 2";
+        };
+        switch3: switch3 {
+            gpios = <&gpiod 6 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //PD6
+            label = "Switch 3";
+        };
+    };
+
+    aliases {
+        switch0 = &switch0;
+        switch1 = &switch1;
+        switch2 = &switch2;
+        switch3 = &switch3;
+    };
+};
+
+/ {
+    power_sw: power_sw {
+        compatible = "gpio-keys";
+        power_sw_gpio: power_sw_gpio {
+            gpios = <&gpioa 0 GPIO_ACTIVE_LOW>; //PA0
+            label = "Power Button";
+        };
+
+        poweroff_gpio: poweroff_gpio {
+
+            gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>; //PB7
+            label = "Poweroff Control";
+        };
+    };
+
+
+    aliases {
+        power-sw = &power_sw_gpio;
+        poweroff-gpio = &poweroff_gpio;
+    };
+
+    sw0 {
+        status = "disabled";
+    };
+};
+
+
+
+

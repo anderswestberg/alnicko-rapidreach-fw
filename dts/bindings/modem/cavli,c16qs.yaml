@@ -1,0 +1,14 @@
+
+description: Cavli C16QS modem
+
+compatible: "cavli,c16qs"
+
+include: uart-device.yaml
+
+properties:
+  mdm-power-gpios:
+    type: phandle-array
+    required: true
+
+  mdm-reset-gpios:
+    type: phandle-array

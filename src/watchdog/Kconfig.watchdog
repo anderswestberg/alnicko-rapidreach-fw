@@ -1,0 +1,24 @@
+menuconfig RPR_MODULE_WATCHDOG
+    bool "Enable Watchdog control module"
+    select GPIO
+	  default y
+    help
+      Enable watchdog functionality.
+      Automatically selects CONFIG_GPIO.
+
+if RPR_MODULE_WATCHDOG
+config RPR_MODULE_WATCHDOG_LOG_LEVEL
+    int "Watchdog module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_DISABLE_WATCHDOG_WHILE_DEBUG
+    bool "Disable watchdog reset for debugging"
+    default n
+    help
+      If enabled, the watchdog will be disabled or its reset will be suspended
+      while the CPU is halted in debug mode. This allows you to debug
+      the application without the board being reset by the watchdog timer.
+endif

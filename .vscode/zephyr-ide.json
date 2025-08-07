@@ -1,0 +1,62 @@
+{
+  "projects": {
+    "rapidreach-fw": {
+      "rel_path": "",
+      "name": "rapidreach-fw",
+      "buildConfigs": {
+        "build/stm32h573i_dk": {
+          "relBoardDir": "boards",
+          "board": "stm32h573i_dk",
+          "relBoardSubDir": "../external/zephyr/boards/st/stm32h573i_dk",
+          "name": "build/stm32h573i_dk",
+          "westBuildArgs": "",
+          "westBuildCMakeArgs": " -DCONFIG_DEBUG_OPTIMIZATIONS=y -DCONFIG_DEBUG_THREAD_INFO=y  ",
+          "confFiles": {
+            "config": [],
+            "extraConfig": [
+              "boards/nrf7002_ek.conf"
+            ],
+            "overlay": [],
+            "extraOverlay": [
+              "boards/nrf7002_ek.overlay"
+            ]
+          },
+          "runnerConfigs": {
+            "stm32cubeprogrammer": {
+              "runner": "stm32cubeprogrammer",
+              "name": "stm32cubeprogrammer",
+              "args": ""
+            }
+          }
+        },
+        "build/speaker": {
+          "relBoardDir": "boards",
+          "board": "speaker",
+          "relBoardSubDir": "alnicko/speaker",
+          "name": "build/speaker",
+          "westBuildArgs": "--sysbuild",
+          "westBuildCMakeArgs": " -DCONFIG_DEBUG_OPTIMIZATIONS=y -DCONFIG_DEBUG_THREAD_INFO=y ",
+          "confFiles": {
+            "config": [],
+            "extraConfig": [],
+            "overlay": [],
+            "extraOverlay": []
+          },
+          "runnerConfigs": {
+            "stm32cubeprogrammer": {
+              "runner": "stm32cubeprogrammer",
+              "name": "stm32cubeprogrammer",
+              "args": ""
+            }
+          }
+        }
+      },
+      "confFiles": {
+        "config": [],
+        "extraConfig": [],
+        "overlay": [],
+        "extraOverlay": []
+      }
+    }
+  }
+}

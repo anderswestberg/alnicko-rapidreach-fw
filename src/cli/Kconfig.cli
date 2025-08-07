@@ -1,0 +1,17 @@
+config RPR_MODULE_CLI_SHELL
+    bool "Enable CLI (Shell) support"
+    depends on RPR_MODULE_LED && RPR_MODULE_SWITCH && RPR_MODULE_POWEROFF && \
+    RPR_MODULE_CHARGER && RPR_MODULE_DEV_INFO && RPR_MODULE_WATCHDOG && \
+    RPR_MODULE_BATTERY && RPR_MODULE_AUDIO_PLAYER && RPR_MODULE_MICROPHONE
+    select SERIAL
+    select SHELL
+    default y
+     help
+      Enable the command-line interface (CLI) via serial port.
+
+config RPR_MODULE_CLI_SHELL_TEST
+    bool "Enable CLI Shell Test Commands"
+    depends on RPR_MODULE_CLI_SHELL
+    default n
+    help
+      Enable additional SHELL commands and features for testing and development.

@@ -1,0 +1,52 @@
+menuconfig RPR_MODULE_HTTP
+    bool "Enable HTTP module"
+    select POSIX_API
+    select HTTP_CLIENT
+    select NET_TCP
+    select NET_CONTEXT_RCVTIMEO
+    select NET_CONTEXT_SNDTIMEO
+    default y
+    help
+      Enable HTTP module with support for client operations.
+      Automatically selects required network and POSIX APIs.
+
+if RPR_MODULE_HTTP
+config RPR_MODULE_HTTP_LOG_LEVEL
+    int "HTTP module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_ENABLE_HTTPS
+    bool "Enable HTTPS support"
+    select MBEDTLS
+    select MBEDTLS_ENABLE_HEAP
+    select MBEDTLS_PEM_CERTIFICATE_FORMAT
+    select NET_SOCKETS_SOCKOPT_TLS
+    default n
+    help
+      Enable HTTPS support in the HTTP module.
+      Selects mbedTLS with heap-based memory and PEM certificate format.
+
+config RPR_HTTP_MAX_URL_LENGTH
+	int "Maximum length of the HTTP URL"
+	default 256
+
+config RPR_HTTP_RECV_BUFFER_SIZE
+    int "HTTP receive buffer size (in bytes)"
+    default 256
+    help
+      Size of the buffer used to receive HTTP response data chunks.
+
+config RPR_HASH_CALCULATION
+    bool "Enable calculation SHA-256 hash after download"
+    select REQUIRES_FULL_LIBC
+    select MBEDTLS
+    select MBEDTLS_ENABLE_HEAP
+    select MBEDTLS_MD
+    default n
+    help
+      Print the SHA-256 hash of the downloaded content. Useful for verifying integrity.
+
+endif

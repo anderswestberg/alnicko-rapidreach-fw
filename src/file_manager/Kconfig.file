@@ -1,0 +1,62 @@
+menuconfig RPR_MODULE_FILE_MANAGER
+    bool "Enable File Manager Module"
+	select FLASH
+	select FLASH_MAP
+	select FILE_SYSTEM
+	select FILE_SYSTEM_LITTLEFS
+    default y if RPR_MODULE_HTTP || RPR_MODULE_AUDIO_PLAYER
+    help
+      Enable file management functions (e.g., HTTP file download).
+      Automatically selects CONFIG_FLASH, CONFIG_FLASH_MAP, CONFIG_FILE_SYSTEM, 
+      CONFIG_FILE_SYSTEM_LITTLEFS.
+
+if RPR_MODULE_FILE_MANAGER
+
+config RPR_FILE_MANAGER_LOG_LEVEL
+    int "File Manager log level"
+    range 0 4
+    default 3
+    help
+      Set logging level for the File Manager module:
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_FS_MNT_POINT
+    string "Filesystem mount point"
+    default "/lfs"
+    help
+      Filesystem path used as a mount point for file operations.
+
+config RPR_AUDIO_DEFAULT_PATH
+    string "Default path for downloaded audio files"
+    default "/lfs/audio"
+    help
+      Path where audio files are stored by default. Used by audio playback and download logic.
+
+config RPR_WIFI_CONFIG_DEFAULT_PATH
+    string "Default path for saved Wi-Fi configuration"
+    default "/lfs/wifi"
+    help
+      Path where Wi-Fi configuration files (e.g., SSID and password) are stored by default.
+      This path is used by the Wi-Fi management module to load or save network settings
+
+config RPR_FILENAME_MAX_LEN
+    int "Maximum length of an audio file name"
+    default 67
+    help
+      Specifies the maximum number of characters allowed in the file name.
+
+  config RPR_FOLDER_PATH_MAX_LEN
+    int "Maximum length of folder path for downloads"
+    default 200
+    help
+      Maximum length for the folder path (e.g., /lfs/audio).
+
+  config RPR_FILE_SYSTEM_LFS_SHELL
+    bool "Enable LFS shell commands for testing"
+    select FILE_SYSTEM_SHELL
+    default y if RPR_MODULE_CLI_SHELL_TEST
+    help
+      Enable shell commands to test the file system (e.g., ls, read, write).
+      Useful for verifying LFS mount and file operations manually via CLI.
+
+endif

@@ -1,0 +1,241 @@
+// This overlay is intended for use with the nrf7002_ek module 
+// on the STM32H573I-DK development board.
+
+/  {
+    charger_pins: charger_pins {
+        compatible = "gpio-keys";
+
+        acok_gpios: acok_gpios {
+            gpios = <&gpioh 6 (GPIO_ACTIVE_LOW)>; //PH6
+            label = "ACOK Pin";
+        };
+
+        chgok_gpios: chgok_gpios {
+            gpios = <&gpioh 8 (GPIO_ACTIVE_LOW)>; //PH8
+            label = "CHGOK Pin";
+        };
+        chgen_gpios: chgen_gpios {
+            gpios = <&gpioh 7 (GPIO_ACTIVE_LOW)>; //PH7
+            label = "CHGEN Pin";
+        };
+        input_power_gpios: input_power_gpios {
+            gpios = <&gpiob 7 (GPIO_ACTIVE_LOW)>; //PB7
+            label = "Input Power Detect Pin";
+        };
+    };
+
+    aliases {
+        acok = &acok_gpios;
+        chgok = &chgok_gpios;
+        chgen = &chgen_gpios;
+        inputp = &input_power_gpios;
+    };
+};
+
+/ {
+    aliases {
+        modem = &modem;
+    };
+};
+
+&usart3 {
+    status = "disabled";
+};
+
+/ {
+    arduino_header: connector {
+        gpio-map = <>;
+    };
+};
+
+/ {
+    aliases {
+        led1 = &red_led_0;
+        led2 = &orange_led_0;
+        led3 = &green_led_0;
+    };
+};
+
+/  {
+    microphone_pin: microphone_pin {
+        compatible = "gpio-keys";
+
+        microphone_gpio: microphone_gpio {
+            gpios = <&gpiof 6 (GPIO_ACTIVE_HIGH)>; //PF6
+            label = "Sound Detect Pin";
+        };
+    };
+
+    aliases {
+        microphone = &microphone_gpio;
+    };
+};
+
+/  {
+    watchdog_pins: watchdog_pins {
+        compatible = "gpio-keys";
+
+        wdi_gpios: wdi_gpios {
+            gpios = <&gpiof 11 (GPIO_ACTIVE_LOW)>; //PF11
+            label = "Watchdog Input Pin";
+        };
+
+        wden_gpios: wden_gpios {
+            gpios = <&gpioh 12 (GPIO_ACTIVE_LOW)>; //PH12
+            label = "Watchdog EN Pin";
+        };
+    };
+
+    aliases {
+        wdi = &wdi_gpios;
+        wden = &wden_gpios;
+    };
+};
+
+/  {
+    audio_codec_gpio: audio_codec_gpio {
+        compatible = "gpio-keys";
+
+        codec_en_gpios: codec_en_gpios {
+            gpios = <&gpiof 9 (GPIO_ACTIVE_LOW)>; //PF9
+            label = "Audio codec EN Pin";
+        };
+    };
+
+    aliases {
+        codec-en-pin = &codec_en_gpios;
+    };
+};
+
+
+/ {
+    board_rev_pins: board_rev_pins {
+        compatible = "gpio-keys";
+
+        rev0_gpio: rev0_gpio {
+            gpios = <&gpiof 3 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PF3
+            label = "Board Revision Bit 0";
+        };
+
+        rev1_gpio: rev1_gpio {
+            gpios = <&gpiob 12 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PB12
+            label = "Board Revision Bit 1";
+        };
+
+        rev2_gpio: rev2_gpio {
+            gpios = <&gpioh 4 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PH4
+            label = "Board Revision Bit 2";
+        };
+
+        rev3_gpio: rev3_gpio {
+            gpios = <&gpioh 5 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; // PH5
+            label = "Board Revision Bit 3";
+        };
+    };
+
+    aliases {
+        rev0 = &rev0_gpio;
+        rev1 = &rev1_gpio;
+        rev2 = &rev2_gpio;
+        rev3 = &rev3_gpio;
+    };
+};
+
+
+/ {
+    switches: switches {
+        compatible = "gpio-keys";
+
+        switch0: switch0 {
+            gpios = <&gpioa 4 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A1
+            label = "Switch 0";
+        };
+        switch1: switch1 {
+            gpios = <&gpioa 0 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A2
+            label = "Switch 1";
+        };
+        switch2: switch2 {
+            gpios = <&gpiof 12 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A5
+            label = "Switch 2";
+        };
+        switch3: switch3 {
+            gpios = <&gpioa 6 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; //A4
+            label = "Switch 3";
+        };
+    };
+
+    aliases {
+        switch0 = &switch0;
+        switch1 = &switch1;
+        switch2 = &switch2;
+        switch3 = &switch3;
+    };
+};
+
+/ {
+    power_sw: power_sw {
+        compatible = "gpio-keys";
+        power_sw_gpio: power_sw_gpio {
+            gpios = <&gpioc 13 GPIO_ACTIVE_LOW>; //PC13
+            label = "Power Button";
+        };
+
+        poweroff_gpio: poweroff_gpio {
+
+            gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>; //A3
+            label = "Poweroff Control";
+        };
+    };
+
+
+    aliases {
+        power-sw = &power_sw_gpio;
+        poweroff-gpio = &poweroff_gpio;
+    };
+
+    sw0 {
+        status = "disabled";
+    };
+};
+
+/ {
+  chosen {
+    zephyr,wifi = &nrf70_wlan;
+  };
+};
+
+&spi2 { //SPI wifi 
+	pinctrl-0 = <&spi2_nss_pa3  &spi2_sck_pi1
+		     &spi2_miso_pi2 &spi2_mosi_pb15>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	nrf70: nrf7002@0 {
+		compatible = "nordic,nrf7002-spi";
+		status = "okay";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+
+		iovdd-ctrl-gpios = <&gpiob 11 GPIO_ACTIVE_HIGH>; //PB11
+		bucken-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>; //PB10
+		host-irq-gpios = <&gpiog 5 GPIO_ACTIVE_HIGH>; //PG5 
+
+		wifi-max-tx-pwr-2g-dsss = <21>;
+		wifi-max-tx-pwr-2g-mcs0 = <16>;
+		wifi-max-tx-pwr-2g-mcs7 = <16>;
+
+
+		wifi-max-tx-pwr-5g-low-mcs0 = <9>;
+		wifi-max-tx-pwr-5g-low-mcs7 = <9>;
+		wifi-max-tx-pwr-5g-mid-mcs0 = <11>;
+		wifi-max-tx-pwr-5g-mid-mcs7 = <11>;
+		wifi-max-tx-pwr-5g-high-mcs0 = <13>;
+		wifi-max-tx-pwr-5g-high-mcs7 = <13>;	
+
+
+		nrf70_wlan: nrf70_wlan {
+			compatible = "nordic,wlan";
+		};
+	};
+};
+

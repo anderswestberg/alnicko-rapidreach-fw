@@ -1,0 +1,28 @@
+menuconfig RPR_MODULE_SYSTEM_WATCHDOG
+    bool "Enable System Watchdog control module"
+    select WATCHDOG
+	  default y if BOOTLOADER_MCUBOOT
+    help
+      Enable internal watchdog functionality.
+      Handles freezes both during reboot and during update.
+      Automatically selects CONFIG_WATCHDOG.
+
+if RPR_MODULE_SYSTEM_WATCHDOG
+config RPR_MODULE_SYSTEM_WATCHDOG_LOG_LEVEL
+    int "System watchdog module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+
+config RPR_MODULE_SYSTEM_WATCHDOG_TIMEOUT_MS
+    int "Watchdog timeout (ms)"
+    range 1 26214
+    default 15000
+    help
+      Maximum allowed time (in milliseconds) before the watchdog triggers a reset.
+      Must match hardware limitations (for STM32 IWDG max is 26214 ms).
+      This value is used to configure the watchdog expiration window.
+
+endif

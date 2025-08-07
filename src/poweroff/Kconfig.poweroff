@@ -1,0 +1,16 @@
+menuconfig RPR_MODULE_POWEROFF
+    bool "Enable Poweroff module"
+    select GPIO
+	  default y
+    help
+      Enable power button handling and shutdown.
+      Automatically selects CONFIG_GPIO.
+
+if RPR_MODULE_POWEROFF
+config RPR_MODULE_POWEROFF_LOG_LEVEL
+    int "Poweroff module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+endif

@@ -1,0 +1,13 @@
+board:
+  name: speaker
+  full_name: RPR001-SCH-001-Rxx Speaker Board
+  vendor: alnicko
+  revision:
+    format: number
+    exact: false
+    default: "1"
+    revisions:
+      - name: "1"
+  socs:
+    - name: stm32h573xx
+    

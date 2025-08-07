@@ -1,0 +1,89 @@
+menuconfig RPR_MODULE_AUDIO_PLAYER
+    bool "Enable Audio Player module"
+    select EVENTS
+	  default n
+    help
+      Enable audio playback using I2S and audio codec.
+
+if RPR_MODULE_AUDIO_PLAYER
+config RPR_MODULE_AUDIO_PLAYER_LOG_LEVEL
+    int "Audio Player module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_I2S_AUDIO_CODEC
+    bool "Enable Audio Codec and I2S"
+    default y if RPR_MODULE_AUDIO_PLAYER
+    select I2S
+    select AUDIO
+    select AUDIO_CODEC
+    help
+      Enable audio, I2S and audio codec.
+      Automatically selects CONFIG_I2S, CONFIG_AUDIO, CONFIG_AUDIO_CODEC.
+
+config RPR_I2S_BLOCK_BUFFERS
+  	int "Count of audio data blocks"
+  	default 4
+  	help
+  	  Controls the count of audio data blocks  
+
+config RPR_SAMPLE_FREQ
+	  int "Sample rate"
+	  default 48000
+	  help
+	    Sample frequency of the system.
+
+
+config RPR_MEASURING_DECODE_TIME
+    bool "Enable measurement of audio decode time"
+  	default n
+    help
+      If enabled, the system will measure and display the time   taken
+      to decode each audio file or audio data block.
+      Useful for analyzing codec performance and system loading.
+
+config RPR_DEFAULT_VOLUME_LEVEL
+    int "Default audio volume level"
+    default -70
+    help
+      Set the default volume level for audio playback after system startup. 
+
+config RPR_DEFAULT_MUTE_STATE
+    bool "Default mute state"
+    default n
+    help
+      Set the default mute state for the audio player.
+      If enabled, audio playback will start muted until unmuted manually.
+
+config RPR_AUDIO_AUTO_MUTE
+    bool "Enable automatic mute on start/stop"
+    default y
+    help
+      If enabled, the audio player will automatically unmute the output
+      at the beginning of playback and mute after playback ends.
+      If disabled, mute can be managed manually.
+
+config RPR_AUDIO_PLAYER_STEREO
+    bool "Enable stereo output"
+    default n
+    help
+      If enabled, the audio will be used stereo playback (2 channels).
+      If disabled, mono playback will be used (1 channel).
+
+config RPR_AUDIO_COUNT_SILENCE_BLOCK
+    int "Number of silence blocks after audio"
+    default 64
+    help
+      The number of blocks of silence to play at the beginning and end of audio playback.
+
+config RPR_AUDIO_ENABLE_STANDBY_WHEN_IDLE
+    bool "Enable standby mode when audio is idle"
+    default y
+    help
+      When enabled, the system will enter standby or low-power mode 
+      while no audio is playing. The mode will automatically disable 
+      when audio playback starts and re-enable when playback ends.
+
+endif

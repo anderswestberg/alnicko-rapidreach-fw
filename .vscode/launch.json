@@ -1,0 +1,24 @@
+
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STlink launch",
+            "cwd": "${workspaceRoot}",
+            "preLaunchTask": "Start ST-LINK GDB Server",
+            "executable": "${command:zephyr-ide.select-active-build-path}/rapidreach-fw/zephyr/zephyr.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "external",
+            "runToMain": true, 
+            "gdbTarget": ":61234", 
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "raw",
+            "armToolchainPath": "/usr/bin/",
+            "overrideLaunchCommands": [
+                "load",
+                "monitor reset"
+            ],
+        }
+    ]
+}
