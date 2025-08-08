@@ -2436,6 +2436,15 @@ static int cmd_device_info(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
+/**
+ * @brief Simple test command that outputs "Hello".
+ */
+static int cmd_test(const struct shell *sh, size_t argc, char **argv)
+{
+    shell_print(sh, "Hello");
+    return 0;
+}
+
 /* ------------ Root rapidreach Command ------------ */
 SHELL_STATIC_SUBCMD_SET_CREATE(
         sub_rapidreach,
@@ -2456,6 +2465,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(poweroff, NULL, "System shutdown", cmd_poweroff),
         SHELL_CMD(dfu, &sub_dfu, "DFU management commands", NULL),
         SHELL_CMD(rtc, &rtc_cmds, "RTC commands", NULL),
+        SHELL_CMD(test, NULL, "Test command", cmd_test),
         SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(rapidreach, &sub_rapidreach, "RapidReach commands", NULL);
