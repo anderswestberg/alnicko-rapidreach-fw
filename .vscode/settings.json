@@ -1,5 +1,5 @@
 {
-    "zephyr-ide.use-zephyr-ide-json": true,
+    "zephyr-ide.use-zephyr-ide-json": false,
     "zephyr-ide.projects": null,
     "devicetree.zephyr": "${workspaceFolder}/external/zephyr",
     "kconfig.zephyr.base": "${workspaceFolder}/external/zephyr",
@@ -60,6 +60,8 @@
     "editor.formatOnSaveMode": "file",
     "terminal.integrated.defaultProfile.linux": "Zephyr IDE Terminal",
     "C_Cpp.default.compileCommands": "${workspaceFolder}/.vscode/compile_commands.json",
+    "C_Cpp.default.configurationProvider": "",
+    "C_Cpp.intelliSenseEngine": "default",
     "cmake.configureOnOpen": false,
 
 }

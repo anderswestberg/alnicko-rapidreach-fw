@@ -1,0 +1,12 @@
+{
+    "configurations": [
+        {
+            "name": "Zephyr",
+            "compileCommands": "${workspaceFolder}/.vscode/compile_commands.json",
+            "cStandard": "c99",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ],
+    "version": 4
+}

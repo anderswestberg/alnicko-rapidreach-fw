@@ -2629,6 +2629,7 @@ static int cmd_mqtt_heartbeat_send(const struct shell *sh, size_t argc, char **a
 #endif
 }
 
+#ifdef CONFIG_RPR_MODULE_MQTT
 SHELL_STATIC_SUBCMD_SET_CREATE(
         sub_mqtt_heartbeat,
         SHELL_CMD(start, NULL, "Start periodic heartbeat", cmd_mqtt_heartbeat_start),
@@ -2645,6 +2646,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD_ARG(publish, NULL, "Publish message. Usage: mqtt publish <topic> <message>", cmd_mqtt_publish, 3, 0),
         SHELL_CMD(heartbeat, &sub_mqtt_heartbeat, "Heartbeat control", NULL),
         SHELL_SUBCMD_SET_END);
+#endif
 
 /**
  * @brief Shell command to display board info, firmware and hardware version information.
@@ -2701,7 +2703,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(charger, &sub_charger, "Charger control", NULL),
         SHELL_CMD(battery, NULL, "Battery status", cmd_battery_get_status),
         SHELL_CMD(net, &sub_internet, "Internet control", NULL),
+#ifdef CONFIG_RPR_MODULE_MQTT
         SHELL_CMD(mqtt, &sub_mqtt, "MQTT client control", NULL),
+#endif
         SHELL_CMD(info, NULL, "Print device info", cmd_device_info),
         SHELL_CMD(audio, &audio_cmds, "Audio player commands", NULL),
         SHELL_CMD_ARG(switch,
