@@ -1,0 +1,61 @@
+menuconfig RPR_MODULE_MQTT
+    bool "Enable MQTT module"
+    select POSIX_API
+    select MQTT_LIB
+    select NET_TCP
+    select NET_CONTEXT_RCVTIMEO
+    select NET_CONTEXT_SNDTIMEO
+    default n
+    help
+      Enable MQTT module with support for publishing and subscribing.
+      Includes periodic heartbeat/alive message functionality.
+
+if RPR_MODULE_MQTT
+
+config RPR_MODULE_MQTT_LOG_LEVEL
+    int "MQTT module log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_MQTT_BROKER_HOST
+    string "MQTT broker hostname or IP"
+    default "localhost"
+    help
+      The hostname or IP address of the MQTT broker to connect to.
+
+config RPR_MQTT_BROKER_PORT
+    int "MQTT broker port"
+    range 1 65535
+    default 1883
+    help
+      The port number of the MQTT broker (typically 1883 for non-TLS).
+
+config RPR_MQTT_CLIENT_ID
+    string "MQTT client ID"
+    default "rapidreach_device"
+    help
+      The client ID to use when connecting to the MQTT broker.
+
+config RPR_MQTT_HEARTBEAT_TOPIC
+    string "MQTT heartbeat topic"
+    default "rapidreach/heartbeat"
+    help
+      The MQTT topic to publish heartbeat/alive messages to.
+
+config RPR_MQTT_HEARTBEAT_INTERVAL_SEC
+    int "Heartbeat interval in seconds"
+    range 1 3600
+    default 30
+    help
+      How often to publish heartbeat messages (in seconds).
+
+config RPR_MQTT_KEEPALIVE_SEC
+    int "MQTT keep-alive interval in seconds"
+    range 10 300
+    default 60
+    help
+      MQTT keep-alive interval for the connection.
+
+endif # RPR_MODULE_MQTT

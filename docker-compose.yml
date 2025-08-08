@@ -1,0 +1,48 @@
+services:
+  # EMQX MQTT Broker with built-in dashboard
+  emqx:
+    image: emqx/emqx:5.7.2
+    container_name: rapidreach-emqx
+    restart: unless-stopped
+    ports:
+      - "1883:1883"      # MQTT port
+      - "8083:8083"      # MQTT over WebSocket
+      - "8084:8084"      # MQTT over SSL/TLS
+      - "8883:8883"      # MQTT over SSL
+      - "18083:18083"    # Dashboard (HTTP)
+    environment:
+      - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard"
+      - EMQX_ALLOW_ANONYMOUS="true"
+      - EMQX_ACL_NOMATCH="allow"
+    volumes:
+      - emqx-data:/opt/emqx/data
+      - emqx-log:/opt/emqx/log
+    networks:
+      - rapidreach-net
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MQTT Test Client (Python-based)
+  mqtt-test-client:
+    image: python:3.11-slim
+    container_name: mqtt-test-client
+    restart: unless-stopped
+    networks:
+      - rapidreach-net
+    depends_on:
+      - emqx
+    volumes:
+      - ./mqtt/scripts:/app
+    working_dir: /app
+    command: sh -c "pip install paho-mqtt && tail -f /dev/null"
+
+volumes:
+  emqx-data:
+  emqx-log:
+
+networks:
+  rapidreach-net:
+    driver: bridge

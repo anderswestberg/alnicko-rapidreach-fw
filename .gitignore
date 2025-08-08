@@ -61,3 +61,5 @@ compile_commands.json
 
 # Script files
 firmware_updates
+mqtt/data/mosquitto.db
+mqtt/config/mosquitto.conf

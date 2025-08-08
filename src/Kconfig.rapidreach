@@ -41,6 +41,7 @@ config RPR_NET_SHELL_SUPPORT
 rsource "ethernet/Kconfig.ethernet"
 rsource "modem/Kconfig.modem"
 rsource "wifi/Kconfig.wifi"
+rsource "mqtt_module/Kconfig.mqtt"
 rsource "http_module/Kconfig.http"
 
 

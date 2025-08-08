@@ -52,6 +52,10 @@
 #include "dfu_manager.h"
 #endif
 
+#ifdef CONFIG_RPR_MODULE_MQTT
+#include "../mqtt_module/mqtt_module.h"
+#endif
+
 #ifdef CONFIG_EXAMPLES_ENABLE_MAIN_EXAMPLES
 #include "power_supervisor.h"
 #endif
@@ -2400,6 +2404,249 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_SUBCMD_SET_END);
 
 /**
+ * @brief MQTT init command
+ */
+static int cmd_mqtt_init(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_init();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "MQTT module initialized successfully");
+        break;
+    default:
+        shell_error(sh, "Failed to initialize MQTT module: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief MQTT connect command
+ */
+static int cmd_mqtt_connect(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_module_connect();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "MQTT connection initiated successfully");
+        break;
+    case MQTT_ERR_NOT_INITIALIZED:
+        shell_error(sh, "MQTT module not initialized");
+        break;
+    case MQTT_ERR_CONNECTION_FAILED:
+        shell_error(sh, "Failed to connect to MQTT broker");
+        break;
+    default:
+        shell_error(sh, "Unknown MQTT error: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief MQTT disconnect command
+ */
+static int cmd_mqtt_disconnect(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_module_disconnect();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "MQTT disconnected successfully");
+        break;
+    case MQTT_ERR_NOT_INITIALIZED:
+        shell_error(sh, "MQTT module not initialized");
+        break;
+    default:
+        shell_error(sh, "Unknown MQTT error: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief MQTT status command
+ */
+static int cmd_mqtt_status(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    bool connected = mqtt_is_connected();
+    shell_print(sh, "MQTT Status:");
+    shell_print(sh, "  Connected: %s", connected ? "Yes" : "No");
+    shell_print(sh, "  Broker: %s:%d", CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
+    shell_print(sh, "  Client ID: %s", CONFIG_RPR_MQTT_CLIENT_ID);
+    shell_print(sh, "  Heartbeat Topic: %s", CONFIG_RPR_MQTT_HEARTBEAT_TOPIC);
+    shell_print(sh, "  Heartbeat Interval: %d seconds", CONFIG_RPR_MQTT_HEARTBEAT_INTERVAL_SEC);
+    return 0;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief MQTT publish command
+ */
+static int cmd_mqtt_publish(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    if (argc < 3) {
+        shell_error(sh, "Usage: mqtt publish <topic> <message>");
+        return -EINVAL;
+    }
+    
+    const char *topic = argv[1];
+    const char *message = argv[2];
+    
+    mqtt_status_t ret = mqtt_module_publish(topic, message, strlen(message));
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "Message published to '%s'", topic);
+        break;
+    case MQTT_ERR_NOT_INITIALIZED:
+        shell_error(sh, "MQTT module not initialized");
+        break;
+    case MQTT_ERR_CONNECTION_FAILED:
+        shell_error(sh, "MQTT not connected");
+        break;
+    case MQTT_ERR_PUBLISH_FAILED:
+        shell_error(sh, "Failed to publish message");
+        break;
+    case MQTT_ERR_INVALID_PARAM:
+        shell_error(sh, "Invalid parameters");
+        break;
+    default:
+        shell_error(sh, "Unknown MQTT error: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief MQTT heartbeat start command
+ */
+static int cmd_mqtt_heartbeat_start(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_start_heartbeat();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "MQTT heartbeat started");
+        break;
+    case MQTT_ERR_NOT_INITIALIZED:
+        shell_error(sh, "MQTT module not initialized");
+        break;
+    default:
+        shell_error(sh, "Failed to start heartbeat: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief MQTT heartbeat stop command
+ */
+static int cmd_mqtt_heartbeat_stop(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_stop_heartbeat();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "MQTT heartbeat stopped");
+        break;
+    default:
+        shell_error(sh, "Failed to stop heartbeat: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief MQTT manual heartbeat command
+ */
+static int cmd_mqtt_heartbeat_send(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_send_heartbeat();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "Heartbeat message sent");
+        break;
+    case MQTT_ERR_CONNECTION_FAILED:
+        shell_error(sh, "MQTT not connected");
+        break;
+    case MQTT_ERR_PUBLISH_FAILED:
+        shell_error(sh, "Failed to send heartbeat");
+        break;
+    default:
+        shell_error(sh, "Failed to send heartbeat: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+        sub_mqtt_heartbeat,
+        SHELL_CMD(start, NULL, "Start periodic heartbeat", cmd_mqtt_heartbeat_start),
+        SHELL_CMD(stop, NULL, "Stop periodic heartbeat", cmd_mqtt_heartbeat_stop),
+        SHELL_CMD(send, NULL, "Send heartbeat now", cmd_mqtt_heartbeat_send),
+        SHELL_SUBCMD_SET_END);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+        sub_mqtt,
+        SHELL_CMD(init, NULL, "Initialize MQTT module", cmd_mqtt_init),
+        SHELL_CMD(connect, NULL, "Connect to MQTT broker", cmd_mqtt_connect),
+        SHELL_CMD(disconnect, NULL, "Disconnect from MQTT broker", cmd_mqtt_disconnect),
+        SHELL_CMD(status, NULL, "Show MQTT status", cmd_mqtt_status),
+        SHELL_CMD_ARG(publish, NULL, "Publish message. Usage: mqtt publish <topic> <message>", cmd_mqtt_publish, 3, 0),
+        SHELL_CMD(heartbeat, &sub_mqtt_heartbeat, "Heartbeat control", NULL),
+        SHELL_SUBCMD_SET_END);
+
+/**
  * @brief Shell command to display board info, firmware and hardware version information.
  */
 static int cmd_device_info(const struct shell *sh, size_t argc, char **argv)
@@ -2454,6 +2701,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(charger, &sub_charger, "Charger control", NULL),
         SHELL_CMD(battery, NULL, "Battery status", cmd_battery_get_status),
         SHELL_CMD(net, &sub_internet, "Internet control", NULL),
+        SHELL_CMD(mqtt, &sub_mqtt, "MQTT client control", NULL),
         SHELL_CMD(info, NULL, "Print device info", cmd_device_info),
         SHELL_CMD(audio, &audio_cmds, "Audio player commands", NULL),
         SHELL_CMD_ARG(switch,

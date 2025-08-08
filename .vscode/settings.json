@@ -60,5 +60,6 @@
     "editor.formatOnSaveMode": "file",
     "terminal.integrated.defaultProfile.linux": "Zephyr IDE Terminal",
     "C_Cpp.default.compileCommands": "${workspaceFolder}/.vscode/compile_commands.json",
+    "cmake.configureOnOpen": false,
 
 }
