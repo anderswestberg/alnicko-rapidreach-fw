@@ -1,0 +1,26 @@
+{
+  "name": "jira-importer",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "TypeScript ESM tool to import Jira issues via REST API with proper epic and parent linking",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["jira", "api", "typescript", "esm", "import"],
+  "author": "RapidReach",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
