@@ -39,7 +39,11 @@ static bool mqtt_thread_running = false;
 /* Auto-reconnection state */
 static bool auto_reconnect_enabled = true;
 static int64_t last_reconnect_attempt = 0;
-static int reconnect_interval_ms = 10000; /* 10 seconds between reconnection attempts */
+static int reconnect_interval_ms = 5000; /* Start with 5 seconds */
+static int reconnect_attempts = 0;
+#define MIN_RECONNECT_INTERVAL_MS 5000    /* 5 seconds minimum */
+#define MAX_RECONNECT_INTERVAL_MS 300000  /* 5 minutes maximum */
+#define RECONNECT_BACKOFF_MULTIPLIER 2    /* Double the interval each failure */
 
 /* Subscription management */
 #define MAX_SUBSCRIPTIONS 8
@@ -74,6 +78,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         } else {
             LOG_INF("MQTT client connected!");
             mqtt_connected = true;
+            /* Reset reconnection backoff on successful connection */
+            reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+            reconnect_attempts = 0;
         }
         break;
 
@@ -259,13 +266,26 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
         } else if (auto_reconnect_enabled) {
             /* Attempt auto-reconnection if enough time has passed */
             if (current_time - last_reconnect_attempt >= reconnect_interval_ms) {
-                LOG_INF("Auto-reconnecting to MQTT broker...");
+                LOG_INF("Auto-reconnecting to MQTT broker (attempt %d, wait %d ms)...", 
+                        reconnect_attempts + 1, reconnect_interval_ms);
                 ret = mqtt_internal_connect();
                 if (ret == 0) {
                     /* Wait a bit for the connection to establish */
                     k_sleep(K_MSEC(100));
                     /* Process any incoming CONNACK */
                     mqtt_input(&client);
+                    /* Reset backoff on successful connection attempt */
+                    reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+                    reconnect_attempts = 0;
+                } else {
+                    /* Connection failed, apply exponential backoff */
+                    reconnect_attempts++;
+                    reconnect_interval_ms = reconnect_interval_ms * RECONNECT_BACKOFF_MULTIPLIER;
+                    if (reconnect_interval_ms > MAX_RECONNECT_INTERVAL_MS) {
+                        reconnect_interval_ms = MAX_RECONNECT_INTERVAL_MS;
+                    }
+                    LOG_WRN("Reconnect failed, next attempt in %d seconds", 
+                            reconnect_interval_ms / 1000);
                 }
                 last_reconnect_attempt = current_time;
             }
@@ -432,9 +452,8 @@ mqtt_status_t mqtt_module_connect(void)
         return MQTT_SUCCESS;
     }
 
-    /* Enable auto-reconnection */
-    auto_reconnect_enabled = true;
-
+    /* Don't enable auto-reconnection here - let user enable it after successful connection */
+    
     ret = mqtt_internal_connect();
     if (ret != 0) {
         LOG_ERR("Failed to initiate MQTT connection: %d", ret);

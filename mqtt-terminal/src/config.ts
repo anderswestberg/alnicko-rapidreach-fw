@@ -20,9 +20,9 @@ export const config = {
   },
   device: {
     id: process.env.DEVICE_ID || 'rapidreach_device',
-    // Zephyr built-in MQTT shell topics: <deviceId>_rx (input), <deviceId>_tx (output)
-    commandTopic: (deviceId: string) => `${deviceId}_rx`,
-    responseTopic: (deviceId: string) => `${deviceId}_tx`,
+    // Zephyr built-in MQTT shell topics: rapidreach/<deviceId>/shell/in (input), rapidreach/<deviceId>/shell/out (output)
+    commandTopic: (deviceId: string) => `rapidreach/${deviceId}/shell/in`,
+    responseTopic: (deviceId: string) => `rapidreach/${deviceId}/shell/out`,
   },
   terminal: {
     prompt: process.env.TERMINAL_PROMPT || 'rapidreach> ',
