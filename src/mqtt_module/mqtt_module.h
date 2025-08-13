@@ -29,9 +29,9 @@ typedef enum {
  * 
  * Sets up the MQTT client and starts the heartbeat task.
  * 
- * @return mqtt_status_t MQTT_SUCCESS on success, error code otherwise
+ * @return int 0 on success, negative error code otherwise
  */
-mqtt_status_t mqtt_init(void);
+int mqtt_init(void);
 
 /**
  * @brief Connect to the MQTT broker
@@ -84,6 +84,27 @@ mqtt_status_t mqtt_start_heartbeat(void);
  * @return mqtt_status_t MQTT_SUCCESS on success, error code otherwise
  */
 mqtt_status_t mqtt_stop_heartbeat(void);
+
+/**
+ * @brief Enable automatic reconnection when connection is lost
+ * 
+ * @return mqtt_status_t MQTT_SUCCESS on success, error code otherwise
+ */
+mqtt_status_t mqtt_enable_auto_reconnect(void);
+
+/**
+ * @brief Disable automatic reconnection
+ * 
+ * @return mqtt_status_t MQTT_SUCCESS on success, error code otherwise
+ */
+mqtt_status_t mqtt_disable_auto_reconnect(void);
+
+/**
+ * @brief Check if auto-reconnection is enabled
+ * 
+ * @return true if auto-reconnection is enabled, false otherwise
+ */
+bool mqtt_is_auto_reconnect_enabled(void);
 
 #ifdef __cplusplus
 }

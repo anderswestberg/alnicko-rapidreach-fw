@@ -30,11 +30,24 @@ static bool heartbeat_enabled = false;
 static bool mqtt_connected = false;
 static bool mqtt_initialized = false;
 
+/* MQTT maintenance thread */
+static struct k_thread mqtt_thread;
+static k_tid_t mqtt_thread_id;
+static K_THREAD_STACK_DEFINE(mqtt_thread_stack, 2048);
+static bool mqtt_thread_running = false;
+
+/* Auto-reconnection state */
+static bool auto_reconnect_enabled = true;
+static int64_t last_reconnect_attempt = 0;
+static int reconnect_interval_ms = 10000; /* 10 seconds between reconnection attempts */
+
 /* Forward declarations */
 static void mqtt_evt_handler(struct mqtt_client *const client,
                              const struct mqtt_evt *evt);
 static void heartbeat_work_handler(struct k_work *work);
 static int prepare_mqtt_client(void);
+static void mqtt_thread_func(void *arg1, void *arg2, void *arg3);
+static int mqtt_internal_connect(void);
 
 /**
  * @brief MQTT event handler
@@ -54,8 +67,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         break;
 
     case MQTT_EVT_DISCONNECT:
-        LOG_INF("MQTT client disconnected: %d", evt->result);
+        LOG_WRN("MQTT disconnected: %d", evt->result);
         mqtt_connected = false;
+        /* Note: Automatic reconnection could be implemented here if needed */
         break;
 
     case MQTT_EVT_PUBACK:
@@ -94,6 +108,95 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         LOG_DBG("Unhandled MQTT event: %d", evt->type);
         break;
     }
+}
+
+/**
+ * @brief Internal MQTT connection function (without timeout/waiting)
+ */
+static int mqtt_internal_connect(void)
+{
+    int ret;
+
+    if (mqtt_connected) {
+        return 0; /* Already connected */
+    }
+
+    LOG_INF("Attempting MQTT connection to %s:%d...", 
+            CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
+
+    ret = mqtt_connect(&client);
+    if (ret != 0) {
+        LOG_ERR("MQTT connect call failed: %d", ret);
+        return ret;
+    }
+
+    return 0; /* Connection initiated, wait for CONNACK in event handler */
+}
+
+/**
+ * @brief MQTT maintenance thread - continuously processes packets
+ */
+static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
+{
+    int ret;
+    int64_t current_time;
+    
+    LOG_INF("MQTT maintenance thread started");
+    
+    while (mqtt_thread_running) {
+        current_time = k_uptime_get();
+        
+        if (mqtt_connected) {
+            /* Process incoming MQTT packets */
+            ret = mqtt_input(&client);
+            if (ret < 0) {
+                if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EPIPE) {
+                    LOG_ERR("MQTT connection lost: %d", ret);
+                    mqtt_connected = false;
+                    last_reconnect_attempt = current_time;
+                } else if (ret == -EBUSY) {
+                    LOG_DBG("MQTT socket busy (disconnected): %d", ret);
+                    mqtt_connected = false;
+                    last_reconnect_attempt = current_time;
+                } else if (ret != -EAGAIN && ret != -EWOULDBLOCK) {
+                    LOG_DBG("MQTT input error (non-fatal): %d", ret);
+                    /* Don't immediately disconnect on other errors */
+                }
+            }
+            
+            /* Keep connection alive only if still connected */
+            if (mqtt_connected) {
+                ret = mqtt_live(&client);
+                if (ret < 0 && ret != -EAGAIN) {
+                    if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EPIPE || ret == -EBUSY) {
+                        LOG_ERR("MQTT connection lost during live: %d", ret);
+                        mqtt_connected = false;
+                        last_reconnect_attempt = current_time;
+                    } else {
+                        LOG_DBG("MQTT live error (non-fatal): %d", ret);
+                    }
+                }
+            }
+        } else if (auto_reconnect_enabled) {
+            /* Attempt auto-reconnection if enough time has passed */
+            if (current_time - last_reconnect_attempt >= reconnect_interval_ms) {
+                LOG_INF("Auto-reconnecting to MQTT broker...");
+                ret = mqtt_internal_connect();
+                if (ret == 0) {
+                    /* Wait a bit for the connection to establish */
+                    k_sleep(K_MSEC(100));
+                    /* Process any incoming CONNACK */
+                    mqtt_input(&client);
+                }
+                last_reconnect_attempt = current_time;
+            }
+        }
+        
+        /* Sleep for a short time to avoid busy waiting */
+        k_sleep(K_MSEC(100));
+    }
+    
+    LOG_INF("MQTT maintenance thread stopped");
 }
 
 /**
@@ -179,13 +282,13 @@ static int prepare_mqtt_client(void)
     return 0;
 }
 
-mqtt_status_t mqtt_init(void)
+int mqtt_init(void)
 {
     int ret;
 
     if (mqtt_initialized) {
         LOG_WRN("MQTT module already initialized");
-        return MQTT_SUCCESS;
+        return 0;
     }
 
     LOG_INF("Initializing MQTT module...");
@@ -194,16 +297,24 @@ mqtt_status_t mqtt_init(void)
     ret = prepare_mqtt_client();
     if (ret != 0) {
         LOG_ERR("Failed to prepare MQTT client: %d", ret);
-        return MQTT_ERR_NOT_INITIALIZED;
+        return -1;
     }
 
     /* Initialize heartbeat work */
     k_work_init_delayable(&heartbeat_work, heartbeat_work_handler);
 
+    /* Start MQTT maintenance thread */
+    mqtt_thread_running = true;
+    mqtt_thread_id = k_thread_create(&mqtt_thread, mqtt_thread_stack,
+                                     K_THREAD_STACK_SIZEOF(mqtt_thread_stack),
+                                     mqtt_thread_func, NULL, NULL, NULL,
+                                     K_PRIO_COOP(7), 0, K_NO_WAIT);
+    k_thread_name_set(mqtt_thread_id, "mqtt_maintenance");
+
     mqtt_initialized = true;
     LOG_INF("MQTT module initialized successfully");
 
-    return MQTT_SUCCESS;
+    return 0;
 }
 
 mqtt_status_t mqtt_module_connect(void)
@@ -220,19 +331,39 @@ mqtt_status_t mqtt_module_connect(void)
         return MQTT_SUCCESS;
     }
 
-    LOG_INF("Connecting to MQTT broker %s:%d...", 
-            CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
+    /* Enable auto-reconnection */
+    auto_reconnect_enabled = true;
 
-    ret = mqtt_connect(&client);
+    ret = mqtt_internal_connect();
     if (ret != 0) {
-        LOG_ERR("Failed to connect to MQTT broker: %d", ret);
+        LOG_ERR("Failed to initiate MQTT connection: %d", ret);
         return MQTT_ERR_CONNECTION_FAILED;
     }
 
-    /* Wait a bit for connection to establish */
-    k_sleep(K_MSEC(100));
-
-    return MQTT_SUCCESS;
+    /* Wait for connection to establish - check for CONNACK */
+    int timeout_ms = 5000; /* 5 second timeout */
+    int check_interval_ms = 50;
+    int elapsed_ms = 0;
+    
+    while (elapsed_ms < timeout_ms) {
+        /* Process incoming MQTT packets */
+        ret = mqtt_input(&client);
+        if (ret < 0) {
+            LOG_ERR("MQTT input error: %d", ret);
+            break;
+        }
+        
+        if (mqtt_connected) {
+            LOG_INF("MQTT connection established successfully");
+            return MQTT_SUCCESS;
+        }
+        
+        k_sleep(K_MSEC(check_interval_ms));
+        elapsed_ms += check_interval_ms;
+    }
+    
+    LOG_ERR("MQTT connection timeout after %d ms", timeout_ms);
+    return MQTT_ERR_CONNECTION_FAILED;
 }
 
 mqtt_status_t mqtt_module_disconnect(void)
@@ -247,6 +378,9 @@ mqtt_status_t mqtt_module_disconnect(void)
         return MQTT_SUCCESS;
     }
 
+    /* Disable auto-reconnection when explicitly disconnecting */
+    auto_reconnect_enabled = false;
+
     /* Stop heartbeat first */
     mqtt_stop_heartbeat();
 
@@ -257,6 +391,13 @@ mqtt_status_t mqtt_module_disconnect(void)
     }
 
     mqtt_connected = false;
+    
+    /* Stop MQTT maintenance thread */
+    if (mqtt_thread_running) {
+        mqtt_thread_running = false;
+        k_thread_join(mqtt_thread_id, K_FOREVER);
+    }
+    
     return MQTT_SUCCESS;
 }
 
@@ -293,6 +434,9 @@ mqtt_status_t mqtt_module_publish(const char *topic, const char *payload, size_t
         LOG_ERR("Failed to publish to topic '%s': %d", topic, ret);
         return MQTT_ERR_PUBLISH_FAILED;
     }
+
+    /* Give the maintenance thread a chance to process the publish response */
+    k_sleep(K_MSEC(10));
 
     LOG_DBG("Published to topic '%s': %.*s", topic, (int)payload_len, payload);
     return MQTT_SUCCESS;
@@ -358,6 +502,25 @@ mqtt_status_t mqtt_stop_heartbeat(void)
     k_work_cancel_delayable(&heartbeat_work);
 
     return MQTT_SUCCESS;
+}
+
+mqtt_status_t mqtt_enable_auto_reconnect(void)
+{
+    auto_reconnect_enabled = true;
+    LOG_INF("MQTT auto-reconnection enabled");
+    return MQTT_SUCCESS;
+}
+
+mqtt_status_t mqtt_disable_auto_reconnect(void)
+{
+    auto_reconnect_enabled = false;
+    LOG_INF("MQTT auto-reconnection disabled");
+    return MQTT_SUCCESS;
+}
+
+bool mqtt_is_auto_reconnect_enabled(void)
+{
+    return auto_reconnect_enabled;
 }
 
 /* Auto-initialize MQTT module during system startup */

@@ -1,0 +1,14 @@
+[
+  {
+    "summary": "RapidReach Smart Speaker",
+    "issueType": "Epic",
+    "description": "A smart speaker product built on the RapidReach Device Platform (developed by Alnicko). The device has 24h battery backup and is continuously connected to the RapidReach SaaS via LTE (primary), using MQTT for runtime control and HTTPS/JSON for initial registration. Registration assigns a device secret and the MQTT broker URL plus a backup URL. After registration the device must be ready to receive MQTT PUBLISH commands where the payload starts with a JSON envelope (including a 'size' property for the JSON), immediately followed by binary Opus-encoded audio. The device shall play inline audio instantly upon receipt. Optional messages allow saving the audio to file and later playback via a simple JSON command referencing the filename. The system shall support device status requests/responses, registration reset, and periodic online 'heartbeat' to avoid being marked offline (battery level, IP, signal, uptime, etc.). The device shall implement configurable self-test: play a tune and verify speaker output by analyzing microphone feedback with ambient-noise rejection. Commands must also support restart, Wi‑Fi SSID/secret provisioning, and network priority order (LTE, Ethernet, Wi‑Fi). Logging must be accessible via MQTT (including clear) and statistics reported (e.g., number of power-ons, messages played count and total time). This epic delivers the application/business logic for emergency notification use cases (schools, industrial plants, etc.), leveraging the core platform.",
+    "priority": "Critical",
+    "labels": ["product", "smart-speaker", "mqtt", "https", "registration", "audio", "emergency"],
+    "reporter": "Anders Westberg",
+    "assignee": "Anders Westberg",
+    "components": ["RapidReach"],
+    "epicName": "RapidReach Smart Speaker",
+    "epicKey": "SMART-SPEAKER"
+  }
+]

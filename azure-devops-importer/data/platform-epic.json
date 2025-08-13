@@ -1,0 +1,14 @@
+[
+  {
+    "summary": "RapidReach Device Platform",
+    "issueType": "Epic",
+    "description": "Platform-only firmware for RapidReach devices providing core functionality without business logic. Includes audio subsystem (codec + I2S + playback), CLI, file system (LittleFS), DFU with MCUboot, LEDs, watchdogs, RTC, power management, device info, battery/charger, network interfaces (Ethernet/Wi‑Fi/Modem), and HTTP client utilities. Business logic (cloud workflows, MQTT, alert handling) will be built on top in a separate epic.",
+    "priority": "High",
+    "labels": ["platform", "firmware", "zephyr", "drivers", "io", "network", "audio"],
+    "reporter": "Anders Westberg",
+    "assignee": "Anders Westberg",
+    "components": ["RapidReach"],
+    "epicName": "RapidReach Device Platform",
+    "epicKey": "PLATFORM"
+  }
+]

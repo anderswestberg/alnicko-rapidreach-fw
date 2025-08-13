@@ -16,6 +16,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/fs/fs.h>
+#include <zephyr/net/socket.h>
 #include <stdlib.h>
 
 #include "battery.h"
@@ -2491,8 +2492,11 @@ static int cmd_mqtt_status(const struct shell *sh, size_t argc, char **argv)
 {
 #ifdef CONFIG_RPR_MODULE_MQTT
     bool connected = mqtt_is_connected();
+    bool auto_reconnect = mqtt_is_auto_reconnect_enabled();
+    
     shell_print(sh, "MQTT Status:");
     shell_print(sh, "  Connected: %s", connected ? "Yes" : "No");
+    shell_print(sh, "  Auto-reconnect: %s", auto_reconnect ? "Enabled" : "Disabled");
     shell_print(sh, "  Broker: %s:%d", CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
     shell_print(sh, "  Client ID: %s", CONFIG_RPR_MQTT_CLIENT_ID);
     shell_print(sh, "  Heartbeat Topic: %s", CONFIG_RPR_MQTT_HEARTBEAT_TOPIC);
@@ -2629,12 +2633,151 @@ static int cmd_mqtt_heartbeat_send(const struct shell *sh, size_t argc, char **a
 #endif
 }
 
+/**
+ * @brief Test network connectivity to MQTT broker
+ */
+static int cmd_mqtt_test_connection(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    shell_print(sh, "Testing network connectivity to MQTT broker...");
+    shell_print(sh, "Broker: %s:%d", CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
+    
+    /* Test basic network connectivity using socket */
+    int sock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) {
+        shell_error(sh, "Failed to create socket: %d", errno);
+        return -1;
+    }
+    
+    struct sockaddr_in broker_addr;
+    broker_addr.sin_family = AF_INET;
+    broker_addr.sin_port = htons(CONFIG_RPR_MQTT_BROKER_PORT);
+    
+    int ret = zsock_inet_pton(AF_INET, CONFIG_RPR_MQTT_BROKER_HOST, &broker_addr.sin_addr);
+    if (ret != 1) {
+        shell_error(sh, "Invalid broker IP address: %s", CONFIG_RPR_MQTT_BROKER_HOST);
+        zsock_close(sock);
+        return -1;
+    }
+    
+    shell_print(sh, "Attempting to connect to %s:%d...", 
+                CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
+    
+    ret = zsock_connect(sock, (struct sockaddr *)&broker_addr, sizeof(broker_addr));
+    if (ret < 0) {
+        shell_error(sh, "Failed to connect to broker: %d (errno: %d)", ret, errno);
+        shell_print(sh, "Possible causes:");
+        shell_print(sh, "  - Network interface not up or not default");
+        shell_print(sh, "  - No IP address assigned");
+        shell_print(sh, "  - Broker not reachable");
+        shell_print(sh, "  - Firewall blocking connection");
+    } else {
+        shell_print(sh, "Successfully connected to MQTT broker!");
+        shell_print(sh, "Network connectivity is working.");
+        
+        /* Test sending a simple message to see if connection stays alive */
+        const char test_msg[] = "\x10\x0C\x00\x04MQTT\x04\x00\x00\x0A\x00\x00"; // MQTT CONNECT packet
+        int sent = zsock_send(sock, test_msg, sizeof(test_msg)-1, 0);
+        if (sent > 0) {
+            shell_print(sh, "Sent test MQTT packet (%d bytes)", sent);
+            
+            /* Try to receive response */
+            char response[64];
+            int received = zsock_recv(sock, response, sizeof(response), MSG_DONTWAIT);
+            if (received > 0) {
+                shell_print(sh, "Received response (%d bytes)", received);
+            } else {
+                shell_print(sh, "No immediate response (normal for test packet)");
+            }
+        } else {
+            shell_error(sh, "Failed to send test packet: %d", sent);
+        }
+    }
+    
+    zsock_close(sock);
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief Enable MQTT auto-reconnection
+ */
+static int cmd_mqtt_auto_reconnect_enable(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_enable_auto_reconnect();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "MQTT auto-reconnection enabled");
+        break;
+    default:
+        shell_error(sh, "Failed to enable auto-reconnection: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief Disable MQTT auto-reconnection
+ */
+static int cmd_mqtt_auto_reconnect_disable(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    mqtt_status_t ret = mqtt_disable_auto_reconnect();
+    
+    switch (ret) {
+    case MQTT_SUCCESS:
+        shell_print(sh, "MQTT auto-reconnection disabled");
+        break;
+    default:
+        shell_error(sh, "Failed to disable auto-reconnection: %d", ret);
+        break;
+    }
+    
+    return ret;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
+/**
+ * @brief Show MQTT auto-reconnection status
+ */
+static int cmd_mqtt_auto_reconnect_status(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_RPR_MODULE_MQTT
+    bool enabled = mqtt_is_auto_reconnect_enabled();
+    shell_print(sh, "MQTT auto-reconnection: %s", enabled ? "Enabled" : "Disabled");
+    return 0;
+#else
+    shell_info(sh, "Set CONFIG_RPR_MODULE_MQTT to enable MQTT support.");
+    return 0;
+#endif
+}
+
 #ifdef CONFIG_RPR_MODULE_MQTT
 SHELL_STATIC_SUBCMD_SET_CREATE(
         sub_mqtt_heartbeat,
         SHELL_CMD(start, NULL, "Start periodic heartbeat", cmd_mqtt_heartbeat_start),
         SHELL_CMD(stop, NULL, "Stop periodic heartbeat", cmd_mqtt_heartbeat_stop),
         SHELL_CMD(send, NULL, "Send heartbeat now", cmd_mqtt_heartbeat_send),
+        SHELL_SUBCMD_SET_END);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+        sub_mqtt_auto_reconnect,
+        SHELL_CMD(enable, NULL, "Enable auto-reconnection", cmd_mqtt_auto_reconnect_enable),
+        SHELL_CMD(disable, NULL, "Disable auto-reconnection", cmd_mqtt_auto_reconnect_disable),
+        SHELL_CMD(status, NULL, "Show auto-reconnection status", cmd_mqtt_auto_reconnect_status),
         SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
@@ -2645,6 +2788,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(status, NULL, "Show MQTT status", cmd_mqtt_status),
         SHELL_CMD_ARG(publish, NULL, "Publish message. Usage: mqtt publish <topic> <message>", cmd_mqtt_publish, 3, 0),
         SHELL_CMD(heartbeat, &sub_mqtt_heartbeat, "Heartbeat control", NULL),
+        SHELL_CMD(reconnect, &sub_mqtt_auto_reconnect, "Auto-reconnection control", NULL),
+        SHELL_CMD(test, NULL, "Test network connectivity to MQTT broker", cmd_mqtt_test_connection),
         SHELL_SUBCMD_SET_END);
 #endif
 
