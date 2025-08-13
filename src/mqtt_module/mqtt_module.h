@@ -106,6 +106,33 @@ mqtt_status_t mqtt_disable_auto_reconnect(void);
  */
 bool mqtt_is_auto_reconnect_enabled(void);
 
+/**
+ * @brief MQTT message handler callback type
+ * 
+ * @param topic The topic the message was received on
+ * @param payload The message payload
+ * @param payload_len Length of the payload
+ */
+typedef void (*mqtt_message_handler_t)(const char *topic, const uint8_t *payload, size_t payload_len);
+
+/**
+ * @brief Subscribe to an MQTT topic
+ * 
+ * @param topic The topic to subscribe to
+ * @param qos Quality of Service level (0, 1, or 2)
+ * @param handler Callback function to handle received messages
+ * @return mqtt_status_t MQTT_SUCCESS on success, error code otherwise
+ */
+mqtt_status_t mqtt_module_subscribe(const char *topic, uint8_t qos, mqtt_message_handler_t handler);
+
+/**
+ * @brief Unsubscribe from an MQTT topic
+ * 
+ * @param topic The topic to unsubscribe from
+ * @return mqtt_status_t MQTT_SUCCESS on success, error code otherwise
+ */
+mqtt_status_t mqtt_module_unsubscribe(const char *topic);
+
 #ifdef __cplusplus
 }
 #endif

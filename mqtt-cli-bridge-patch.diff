@@ -1,0 +1,153 @@
+--- a/src/mqtt_module/mqtt_cli_bridge.c
++++ b/src/mqtt_module/mqtt_cli_bridge.c
+@@ -10,6 +10,7 @@
+ #include <zephyr/shell/shell_uart.h>
+ #include <zephyr/logging/log.h>
+ #include <string.h>
++#include <stdio.h>
+ 
+ #include "mqtt_cli_bridge.h"
+ #include "mqtt_module.h"
+@@ -45,50 +46,48 @@ static K_THREAD_STACK_DEFINE(mqtt_cli_work_q_stack, 2048);
+ /* Work item for command execution */
+ static struct k_work cmd_work;
+ 
+-/**
+- * @brief Custom shell transport backend for capturing output
+- */
+-struct mqtt_shell_transport {
+-    struct shell_transport transport;
+-    char *buffer;
+-    size_t buffer_size;
+-    size_t buffer_pos;
+-};
+-
+-static struct mqtt_shell_transport mqtt_transport;
+-
+-/**
+- * @brief Shell transport write function for capturing output
+- */
+-static int mqtt_shell_write(const struct shell_transport *transport,
+-                           const void *data, size_t length, size_t *cnt)
+-{
+-    struct mqtt_shell_transport *mqtt_trans = CONTAINER_OF(transport, 
+-                                                          struct mqtt_shell_transport, 
+-                                                          transport);
+-    
+-    size_t space_left = mqtt_trans->buffer_size - mqtt_trans->buffer_pos;
+-    size_t to_copy = MIN(length, space_left);
+-    
+-    if (to_copy > 0) {
+-        memcpy(&mqtt_trans->buffer[mqtt_trans->buffer_pos], data, to_copy);
+-        mqtt_trans->buffer_pos += to_copy;
+-    }
+-    
+-    *cnt = to_copy;
+-    return 0;
+-}
++/* Output capture state */
++static bool capture_output = false;
++static size_t output_pos = 0;
++static K_MUTEX_DEFINE(output_mutex);
+ 
+ /**
+- * @brief Shell transport read function (not used for output capture)
++ * @brief Hook into shell_fprintf to capture output
+  */
+-static int mqtt_shell_read(const struct shell_transport *transport,
+-                          void *data, size_t length, size_t *cnt)
++void shell_fprintf_hook(const struct shell_fprintf *ctx, const char *fmt, ...)
+ {
+-    ARG_UNUSED(transport);
+-    ARG_UNUSED(data);
+-    ARG_UNUSED(length);
+-    *cnt = 0;
+-    return 0;
++    va_list args;
++    char temp[256];
++    
++    va_start(args, fmt);
++    int len = vsnprintf(temp, sizeof(temp), fmt, args);
++    va_end(args);
++    
++    /* If we're capturing output, store it */
++    if (capture_output && len > 0) {
++        k_mutex_lock(&output_mutex, K_FOREVER);
++        
++        size_t space_left = MQTT_CLI_MAX_RSP_LEN - output_pos - 1;
++        size_t to_copy = MIN(len, space_left);
++        
++        if (to_copy > 0) {
++            memcpy(&rsp_buffer[output_pos], temp, to_copy);
++            output_pos += to_copy;
++            rsp_buffer[output_pos] = '\0';
++        }
++        
++        k_mutex_unlock(&output_mutex);
++    }
++    
++    /* Always pass through to the original handler if we have context */
++    if (ctx && ctx->fwrite && !capture_output) {
++        va_start(args, fmt);
++        char buf[256];
++        len = vsnprintf(buf, sizeof(buf), fmt, args);
++        va_end(args);
++        
++        if (len > 0) {
++            ctx->fwrite(buf, 1, len);
++        }
++    }
+ }
+ 
+ /**
+@@ -109,8 +108,11 @@ static void execute_command_work(struct k_work *work)
+     LOG_INF("Executing CLI command: %s", cmd_buffer);
+     
+     /* Reset output buffer */
+-    mqtt_transport.buffer_pos = 0;
+-    memset(rsp_buffer, 0, MQTT_CLI_MAX_RSP_LEN);
++    k_mutex_lock(&output_mutex, K_FOREVER);
++    output_pos = 0;
++    memset(rsp_buffer, 0, sizeof(rsp_buffer));
++    capture_output = true;
++    k_mutex_unlock(&output_mutex);
+     
+     /* Execute command using the main shell instance */
+     const struct shell *sh = shell_backend_uart_get_ptr();
+@@ -124,16 +126,20 @@ static void execute_command_work(struct k_work *work)
+     /* Execute the command */
+     int ret = shell_execute_cmd(sh, cmd_buffer);
+     
++    /* Stop capturing output */
++    k_mutex_lock(&output_mutex, K_FOREVER);
++    capture_output = false;
++    
+     /* Prepare response */
+     if (ret == 0) {
+         /* Command succeeded - if no output, send success message */
+-        if (mqtt_transport.buffer_pos == 0) {
++        if (output_pos == 0) {
+             strcpy(rsp_buffer, "OK");
+         } else {
+-            /* Copy captured output */
+-            memcpy(rsp_buffer, mqtt_transport.buffer, mqtt_transport.buffer_pos);
+-            rsp_buffer[mqtt_transport.buffer_pos] = '\0';
++            /* Output already in rsp_buffer */
+         }
++        LOG_DBG("Command output (%d bytes): %s", output_pos, rsp_buffer);
++    k_mutex_unlock(&output_mutex);
+     } else {
+         /* Command failed */
+         snprintf(rsp_buffer, sizeof(rsp_buffer), "Error: Command failed (%d)", ret);
+@@ -186,11 +192,6 @@ int mqtt_cli_bridge_init(const char *dev_id)
+     snprintf(rsp_topic, sizeof(rsp_topic), "%s%s%s",
+              MQTT_CLI_CMD_TOPIC_PREFIX, device_id, MQTT_CLI_RSP_TOPIC_SUFFIX);
+     
+-    /* Initialize transport */
+-    mqtt_transport.transport.api = &mqtt_shell_transport_api;
+-    mqtt_transport.buffer = rsp_buffer;
+-    mqtt_transport.buffer_size = MQTT_CLI_MAX_RSP_LEN;
+-    mqtt_transport.buffer_pos = 0;
+     
+     /* Initialize work queue */
+     k_work_queue_init(&mqtt_cli_work_q);

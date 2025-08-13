@@ -41,6 +41,17 @@ static bool auto_reconnect_enabled = true;
 static int64_t last_reconnect_attempt = 0;
 static int reconnect_interval_ms = 10000; /* 10 seconds between reconnection attempts */
 
+/* Subscription management */
+#define MAX_SUBSCRIPTIONS 8
+struct mqtt_subscription {
+    char topic[128];
+    mqtt_message_handler_t handler;
+    uint8_t qos;
+    bool active;
+};
+static struct mqtt_subscription subscriptions[MAX_SUBSCRIPTIONS];
+static struct k_mutex subscriptions_mutex;
+
 /* Forward declarations */
 static void mqtt_evt_handler(struct mqtt_client *const client,
                              const struct mqtt_evt *evt);
@@ -101,6 +112,74 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             LOG_ERR("MQTT PUBCOMP error: %d", evt->result);
         } else {
             LOG_DBG("PUBCOMP packet id: %u", evt->param.pubcomp.message_id);
+        }
+        break;
+
+    case MQTT_EVT_PUBLISH: {
+        const struct mqtt_publish_param *pub = &evt->param.publish;
+        uint8_t payload_buf[256];
+        size_t payload_len = pub->message.payload.len;
+        
+        /* Ensure payload fits in buffer */
+        if (payload_len > sizeof(payload_buf) - 1) {
+            payload_len = sizeof(payload_buf) - 1;
+        }
+        
+        /* Read the payload */
+        int ret = mqtt_read_publish_payload_blocking(client, payload_buf, payload_len);
+        if (ret < 0) {
+            LOG_ERR("Failed to read MQTT payload: %d", ret);
+            break;
+        }
+        payload_buf[payload_len] = '\0';
+        
+        /* Extract topic */
+        char topic_buf[128];
+        size_t topic_len = pub->message.topic.topic.size;
+        if (topic_len > sizeof(topic_buf) - 1) {
+            topic_len = sizeof(topic_buf) - 1;
+        }
+        memcpy(topic_buf, pub->message.topic.topic.utf8, topic_len);
+        topic_buf[topic_len] = '\0';
+        
+        LOG_DBG("Received PUBLISH on topic '%s' [%d bytes]", topic_buf, payload_len);
+        
+        /* Find matching subscription and call handler */
+        k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+        for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+            if (subscriptions[i].active && 
+                strcmp(subscriptions[i].topic, topic_buf) == 0) {
+                if (subscriptions[i].handler) {
+                    subscriptions[i].handler(topic_buf, payload_buf, payload_len);
+                }
+                break;
+            }
+        }
+        k_mutex_unlock(&subscriptions_mutex);
+        
+        /* Send PUBACK for QoS 1 */
+        if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+            struct mqtt_puback_param puback = {
+                .message_id = pub->message_id
+            };
+            mqtt_publish_qos1_ack(client, &puback);
+        }
+        break;
+    }
+
+    case MQTT_EVT_SUBACK:
+        if (evt->result != 0) {
+            LOG_ERR("MQTT SUBACK error: %d", evt->result);
+        } else {
+            LOG_INF("MQTT subscription acknowledged, id: %d", evt->param.suback.message_id);
+        }
+        break;
+
+    case MQTT_EVT_UNSUBACK:
+        if (evt->result != 0) {
+            LOG_ERR("MQTT UNSUBACK error: %d", evt->result);
+        } else {
+            LOG_INF("MQTT unsubscribe acknowledged, id: %d", evt->param.unsuback.message_id);
         }
         break;
 
@@ -302,6 +381,10 @@ int mqtt_init(void)
 
     /* Initialize heartbeat work */
     k_work_init_delayable(&heartbeat_work, heartbeat_work_handler);
+    
+    /* Initialize subscriptions */
+    k_mutex_init(&subscriptions_mutex);
+    memset(subscriptions, 0, sizeof(subscriptions));
 
     /* Start MQTT maintenance thread */
     mqtt_thread_running = true;
@@ -521,6 +604,138 @@ mqtt_status_t mqtt_disable_auto_reconnect(void)
 bool mqtt_is_auto_reconnect_enabled(void)
 {
     return auto_reconnect_enabled;
+}
+
+mqtt_status_t mqtt_module_subscribe(const char *topic, uint8_t qos, mqtt_message_handler_t handler)
+{
+    if (!mqtt_initialized) {
+        return MQTT_ERR_NOT_INITIALIZED;
+    }
+    
+    if (!mqtt_connected) {
+        return MQTT_ERR_CONNECTION_FAILED;
+    }
+    
+    if (!topic || !handler) {
+        return MQTT_ERR_INVALID_PARAM;
+    }
+    
+    /* Find an available subscription slot */
+    k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+    int slot = -1;
+    for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+        if (!subscriptions[i].active) {
+            slot = i;
+            break;
+        }
+    }
+    
+    if (slot < 0) {
+        k_mutex_unlock(&subscriptions_mutex);
+        LOG_ERR("No available subscription slots");
+        return MQTT_ERR_SUBSCRIBE_FAILED;
+    }
+    
+    /* Store subscription info */
+    strncpy(subscriptions[slot].topic, topic, sizeof(subscriptions[slot].topic) - 1);
+    subscriptions[slot].topic[sizeof(subscriptions[slot].topic) - 1] = '\0';
+    subscriptions[slot].handler = handler;
+    subscriptions[slot].qos = qos;
+    subscriptions[slot].active = true;
+    k_mutex_unlock(&subscriptions_mutex);
+    
+    /* Create subscription list */
+    struct mqtt_topic subscribe_topic = {
+        .topic = {
+            .utf8 = (uint8_t *)topic,
+            .size = strlen(topic)
+        },
+        .qos = qos
+    };
+    
+    struct mqtt_subscription_list sub_list = {
+        .list = &subscribe_topic,
+        .list_count = 1,
+        .message_id = 1000 + slot  /* Use slot as part of message ID */
+    };
+    
+    int ret = mqtt_subscribe(&client, &sub_list);
+    if (ret != 0) {
+        /* Clean up on failure */
+        k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+        subscriptions[slot].active = false;
+        k_mutex_unlock(&subscriptions_mutex);
+        
+        LOG_ERR("Failed to subscribe to topic '%s': %d", topic, ret);
+        return MQTT_ERR_SUBSCRIBE_FAILED;
+    }
+    
+    LOG_INF("Subscribed to topic '%s' with QoS %d", topic, qos);
+    return MQTT_SUCCESS;
+}
+
+mqtt_status_t mqtt_module_unsubscribe(const char *topic)
+{
+    if (!mqtt_initialized) {
+        return MQTT_ERR_NOT_INITIALIZED;
+    }
+    
+    if (!mqtt_connected) {
+        return MQTT_ERR_CONNECTION_FAILED;
+    }
+    
+    if (!topic) {
+        return MQTT_ERR_INVALID_PARAM;
+    }
+    
+    /* Find the subscription */
+    k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+    int slot = -1;
+    for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+        if (subscriptions[i].active && 
+            strcmp(subscriptions[i].topic, topic) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    
+    if (slot < 0) {
+        k_mutex_unlock(&subscriptions_mutex);
+        LOG_WRN("Topic '%s' not found in subscriptions", topic);
+        return MQTT_SUCCESS; /* Not an error, just not subscribed */
+    }
+    
+    /* Mark as inactive */
+    subscriptions[slot].active = false;
+    k_mutex_unlock(&subscriptions_mutex);
+    
+    /* Create unsubscription list */
+    struct mqtt_topic unsubscribe_topic = {
+        .topic = {
+            .utf8 = (uint8_t *)topic,
+            .size = strlen(topic)
+        }
+    };
+    
+    struct mqtt_subscription_list unsub_list = {
+        .list = &unsubscribe_topic,
+        .list_count = 1,
+        .message_id = 2000 + slot  /* Use slot as part of message ID */
+    };
+    
+    int ret = mqtt_unsubscribe(&client, &unsub_list);
+    if (ret != 0) {
+        /* Restore subscription on failure */
+        k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+        subscriptions[slot].active = true;
+        k_mutex_unlock(&subscriptions_mutex);
+        
+        LOG_ERR("Failed to unsubscribe from topic '%s': %d", topic, ret);
+        return MQTT_ERR_SUBSCRIBE_FAILED;
+    }
+    
+    LOG_INF("Unsubscribed from topic '%s'", topic);
+    return MQTT_SUCCESS;
 }
 
 /* Auto-initialize MQTT module during system startup */

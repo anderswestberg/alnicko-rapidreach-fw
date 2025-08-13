@@ -55,6 +55,7 @@
 
 #ifdef CONFIG_RPR_MODULE_MQTT
 #include "../mqtt_module/mqtt_module.h"
+#include "../mqtt_module/mqtt_cli_bridge.h"
 #endif
 
 #ifdef CONFIG_EXAMPLES_ENABLE_MAIN_EXAMPLES
@@ -2790,6 +2791,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(heartbeat, &sub_mqtt_heartbeat, "Heartbeat control", NULL),
         SHELL_CMD(reconnect, &sub_mqtt_auto_reconnect, "Auto-reconnection control", NULL),
         SHELL_CMD(test, NULL, "Test network connectivity to MQTT broker", cmd_mqtt_test_connection),
+        SHELL_CMD_ARG(cli, NULL, "MQTT CLI bridge control (enable|disable|status)", cmd_mqtt_cli_bridge, 2, 0),
         SHELL_SUBCMD_SET_END);
 #endif
 

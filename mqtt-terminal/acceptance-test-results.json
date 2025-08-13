@@ -1,0 +1,63 @@
+{
+  "timestamp": "2025-08-13T12:05:47.425Z",
+  "summary": {
+    "total": 6,
+    "passed": 0,
+    "failed": 6
+  },
+  "results": [
+    {
+      "id": "RDP-210",
+      "passed": false,
+      "elapsedSeconds": 0.385,
+      "responses": [
+        "OK",
+        "OK"
+      ]
+    },
+    {
+      "id": "RDP-221",
+      "passed": false,
+      "elapsedSeconds": 0.098,
+      "responses": [
+        "OK"
+      ]
+    },
+    {
+      "id": "RDP-223",
+      "passed": false,
+      "elapsedSeconds": 0.308,
+      "responses": [
+        "Error: Command failed (1)",
+        "OK"
+      ]
+    },
+    {
+      "id": "RDP-207",
+      "passed": false,
+      "elapsedSeconds": 0.294,
+      "responses": [
+        "Error: Command failed (1)",
+        "OK"
+      ]
+    },
+    {
+      "id": "RDP-208",
+      "passed": false,
+      "elapsedSeconds": 0.298,
+      "responses": [
+        "Error: Command failed (1)",
+        "Error: Command failed (1)"
+      ]
+    },
+    {
+      "id": "RDP-209",
+      "passed": false,
+      "elapsedSeconds": 0.303,
+      "responses": [
+        "Error: Command failed (1)",
+        "Error: Command failed (1)"
+      ]
+    }
+  ]
+}

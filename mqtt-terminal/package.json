@@ -1,0 +1,37 @@
+{
+  "name": "mqtt-terminal",
+  "version": "1.0.0",
+  "description": "MQTT-based terminal for RapidReach device CLI",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsc && node dist/test-runner.js",
+    "clean": "rm -rf dist",
+    "demo": "./demo.sh"
+  },
+  "keywords": [
+    "mqtt",
+    "cli",
+    "terminal",
+    "rapidreach"
+  ],
+  "author": "RapidReach Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.11.0",
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
+    "dotenv": "^16.3.1",
+    "inquirer": "^9.2.12",
+    "mqtt": "^5.3.4"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.10.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
