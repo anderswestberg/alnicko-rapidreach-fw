@@ -99,31 +99,42 @@ export class MqttTerminal extends EventEmitter {
         return;
       }
 
-      let responseReceived = false;
+      let gotAnyChunk = false;
+      let buffer = '';
+      let settleTimer: NodeJS.Timeout | null = null;
+      const settleDelayMs = 200;
+
       const responseHandler = (response: string) => {
-        if (!responseReceived) {
-          responseReceived = true;
+        gotAnyChunk = true;
+        buffer += buffer.length ? `\n${response}` : response;
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(() => {
+          this.clearResponseTimeout();
           this.removeListener('response', responseHandler);
-          resolve(response);
-        }
+          resolve(buffer);
+        }, settleDelayMs);
       };
 
       this.on('response', responseHandler);
 
       // Set response timeout
       this.responseTimer = setTimeout(() => {
-        if (!responseReceived) {
-          responseReceived = true;
-          this.removeListener('response', responseHandler);
+        if (settleTimer) clearTimeout(settleTimer);
+        this.removeListener('response', responseHandler);
+        if (gotAnyChunk) {
+          resolve(buffer);
+        } else {
           reject(new Error('Response timeout'));
         }
       }, this.responseTimeout);
 
-      // Publish command
-      this.client.publish(this.commandTopic, command, { qos: 1 }, (err) => {
+      // Publish command - Zephyr shell expects newline-terminated
+      const payload = command.endsWith('\n') ? command : `${command}\n`;
+      this.client.publish(this.commandTopic, payload, { qos: 0 }, (err) => {
         if (err) {
           this.clearResponseTimeout();
           this.removeListener('response', responseHandler);
+          if (settleTimer) clearTimeout(settleTimer);
           reject(err);
         }
       });

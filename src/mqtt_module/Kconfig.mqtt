@@ -58,4 +58,14 @@ config RPR_MQTT_KEEPALIVE_SEC
     help
       MQTT keep-alive interval for the connection.
 
+config RPR_MQTT_USERNAME
+    string "MQTT username"
+    help
+      Username for authenticating to the MQTT broker. Leave unset for anonymous.
+
+config RPR_MQTT_PASSWORD
+    string "MQTT password"
+    help
+      Password for authenticating to the MQTT broker. Leave unset for anonymous.
+
 endif # RPR_MODULE_MQTT

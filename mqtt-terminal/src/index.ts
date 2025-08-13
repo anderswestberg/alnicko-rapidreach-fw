@@ -28,7 +28,7 @@ program
   .version('1.0.0')
   .option('-h, --host <host>', 'MQTT broker host', config.mqtt.brokerHost)
   .option('-p, --port <port>', 'MQTT broker port', String(config.mqtt.brokerPort))
-  .option('-d, --device <id>', 'Device ID', config.device.id)
+.option('-d, --device <id>', 'Device ID (hex, e.g. 313938...)', config.device.id)
   .option('-u, --username <username>', 'MQTT username')
   .option('-P, --password <password>', 'MQTT password')
   .option('-c, --command <cmd>', 'Execute single command and exit')

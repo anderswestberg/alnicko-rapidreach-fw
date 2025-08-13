@@ -344,8 +344,26 @@ static int prepare_mqtt_client(void)
     client.evt_cb = mqtt_evt_handler;
     client.client_id.utf8 = (uint8_t *)CONFIG_RPR_MQTT_CLIENT_ID;
     client.client_id.size = strlen(CONFIG_RPR_MQTT_CLIENT_ID);
-    client.password = NULL;
+    /* Credentials (optional) */
+#ifdef CONFIG_RPR_MQTT_USERNAME
+    static struct mqtt_utf8 username = {
+        .utf8 = (uint8_t *)CONFIG_RPR_MQTT_USERNAME,
+        .size = sizeof(CONFIG_RPR_MQTT_USERNAME) - 1,
+    };
+    client.user_name = &username;
+#else
     client.user_name = NULL;
+#endif
+
+#ifdef CONFIG_RPR_MQTT_PASSWORD
+    static struct mqtt_utf8 password = {
+        .utf8 = (uint8_t *)CONFIG_RPR_MQTT_PASSWORD,
+        .size = sizeof(CONFIG_RPR_MQTT_PASSWORD) - 1,
+    };
+    client.password = &password;
+#else
+    client.password = NULL;
+#endif
     client.protocol_version = MQTT_VERSION_3_1_1;
 
     /* MQTT buffers */
