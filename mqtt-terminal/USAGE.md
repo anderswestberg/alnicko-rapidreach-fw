@@ -17,8 +17,8 @@ The MQTT shell backend uses only the **first 6 characters** of the device ID for
 - Response topic: `{device_id_prefix}_tx`
 
 For example, if your device ID is `313938343233510e003d0029`, the topics will be:
-- `313938_rx` (commands to device)
-- `313938_tx` (responses from device)
+- `devices/313938/rx` (commands to device)
+- `devices/313938/tx` (responses from device)
 
 You can use any device ID that starts with the correct 6-character prefix.
 

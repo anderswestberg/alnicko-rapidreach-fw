@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: RapidReach Assistant
+Date: Wed, 14 Aug 2025 09:00:00 +0000
+Subject: [PATCH] shell: mqtt: Use hierarchical topic structure
+
+Change MQTT shell backend topic format from {deviceId}_tx/{deviceId}_rx
+to devices/{deviceId}/tx and devices/{deviceId}/rx to support proper
+MQTT wildcard subscriptions.
+
+Signed-off-by: RapidReach Assistant <assistant@rapidreach.com>
+---
+ subsys/shell/backends/shell_mqtt.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/subsys/shell/backends/shell_mqtt.c b/subsys/shell/backends/shell_mqtt.c
+index 1234567..abcdefg 100644
+--- a/subsys/shell/backends/shell_mqtt.c
++++ b/subsys/shell/backends/shell_mqtt.c
+@@ -657,8 +657,8 @@ static int shell_mqtt_init(struct shell_mqtt *sh, struct mqtt_publish_param *pu
+ 
+ 	LOG_DBG("Client ID is %s", sh->device_id);
+ 
+-	(void)snprintf(sh->pub_topic, SH_MQTT_TOPIC_MAX_SIZE, "%s_tx", sh->device_id);
+-	(void)snprintf(sh->sub_topic, SH_MQTT_TOPIC_MAX_SIZE, "%s_rx", sh->device_id);
++	(void)snprintf(sh->pub_topic, SH_MQTT_TOPIC_MAX_SIZE, "devices/%s/tx", sh->device_id);
++	(void)snprintf(sh->sub_topic, SH_MQTT_TOPIC_MAX_SIZE, "devices/%s/rx", sh->device_id);
+ 
+ 	ring_buf_init(&sh->rx_rb, RX_RB_SIZE, sh->rx_rb_buf);
+ 
+-- 
+2.34.1
+

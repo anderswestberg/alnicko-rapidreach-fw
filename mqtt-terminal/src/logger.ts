@@ -14,17 +14,20 @@ export class LogClient {
   private flushInterval: number;
   private queue: LogEntry[] = [];
   private timer: NodeJS.Timeout | null = null;
+  private quiet: boolean;
 
   constructor(options: {
     baseUrl?: string;
     source?: string;
     batchSize?: number;
     flushInterval?: number;
+    quiet?: boolean;
   } = {}) {
     this.baseUrl = options.baseUrl || 'http://localhost:3001';
     this.source = options.source || 'mqtt-terminal';
     this.batchSize = options.batchSize || 50;
     this.flushInterval = options.flushInterval || 5000;
+    this.quiet = options.quiet || false;
 
     this.startFlushTimer();
     
@@ -57,11 +60,13 @@ export class LogClient {
 
     this.queue.push(logEntry);
 
-    // Also log to console
-    const consoleMethod = level === 'error' ? console.error : 
-                         level === 'warn' ? console.warn : 
-                         console.log;
-    consoleMethod(`[${level.toUpperCase()}] ${message}`, meta);
+    // Also log to console (unless quiet mode)
+    if (!this.quiet) {
+      const consoleMethod = level === 'error' ? console.error : 
+                           level === 'warn' ? console.warn : 
+                           console.log;
+      consoleMethod(`[${level.toUpperCase()}] ${message}`, meta);
+    }
 
     if (this.queue.length >= this.batchSize) {
       await this.flush();

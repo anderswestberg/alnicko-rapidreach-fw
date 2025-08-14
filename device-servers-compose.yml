@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   emqx:
     image: emqx/emqx:5.3.2
@@ -33,7 +31,7 @@ services:
       retries: 5
 
   log-server:
-    build: .
+    build: ./log-server
     container_name: rapidreach-log-server
     ports:
       - "3001:3000"  # Map to 3001 to avoid conflicts
@@ -49,7 +47,7 @@ services:
       - emqx
 
   device-server:
-    build: ../device-server
+    build: ./device-server
     container_name: rapidreach-device-server
     ports:
       - "3002:3002"

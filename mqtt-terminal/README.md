@@ -58,9 +58,56 @@ Options:
 
 ## Usage
 
-### Starting the Terminal
+### CLI Mode (Recommended)
 
-**Important:** You must provide the device ID when connecting. The device uses only the first 6 characters of the device ID for MQTT topics.
+The `mqtt-terminal` can now be used directly as a command-line tool, making it much more convenient for scripting and automation:
+
+```bash
+# Interactive mode
+node dist/cli.js -d <device_id> [options]
+
+# Single command mode
+node dist/cli.js -d <device_id> -c "<command>" [options]
+
+# Using npm script
+npm run cli -- -d <device_id> -c "<command>" [options]
+```
+
+**CLI Options:**
+```
+Options:
+  -V, --version              output the version number
+  -d, --device <id>          Device ID (required)
+  -h, --host <host>          MQTT broker host (default: "192.168.2.62")
+  -p, --port <port>          MQTT broker port (default: "1883")
+  -u, --username <username>  MQTT username (default: "admin")
+  -w, --password <password>  MQTT password (default: "public")
+  -c, --command <cmd>        Execute single command and exit
+  --timeout <ms>             Response timeout in milliseconds (default: "5000")
+  -i, --interactive          Start interactive mode (default)
+  -v, --verbose              Enable verbose logging
+  --help                     display help for command
+```
+
+**CLI Examples:**
+```bash
+# Quick LED control
+node dist/cli.js -d 313938 -c "app led on 0"
+node dist/cli.js -d 313938 -c "app led off 0"
+
+# Get device info
+node dist/cli.js -d 313938 -c "device id"
+
+# Interactive session
+node dist/cli.js -d 313938
+
+# Custom broker
+node dist/cli.js -d 313938 -h 192.168.2.62 -c "mqtt status"
+```
+
+### Legacy npm Mode
+
+You can still use the old npm-based approach:
 
 #### Finding Your Device ID
 
@@ -77,8 +124,8 @@ Options:
 
 3. From MQTT shell initialization logs:
    ```
-   [00:14:50.469,000] <inf> shell_mqtt: Logs will be published to: 313938_tx
-   [00:14:50.469,000] <inf> shell_mqtt: Subscribing shell cmds from: 313938_rx
+   [00:14:50.469,000] <inf> shell_mqtt: Logs will be published to: devices/313938/tx
+   [00:14:50.469,000] <inf> shell_mqtt: Subscribing shell cmds from: devices/313938/rx
    ```
 
 4. Via serial console:
@@ -171,9 +218,9 @@ In interactive mode, type `help` to see all available commands:
 $ npm run start -- -d 313938
 Connecting to MQTT broker at mqtt://localhost:1883...
 ✓ Connected to MQTT broker
-Command topic: 313938_rx
-Response topic: 313938_tx
-✓ Subscribed to 313938_tx
+Command topic: devices/313938/rx
+Response topic: devices/313938/tx
+✓ Subscribed to devices/313938/tx
 
 ╔════════════════════════════════════════════════════════════╗
 ║          RapidReach MQTT Shell Terminal v2.0               ║
@@ -246,6 +293,26 @@ alias mqtt-cmd='npm run start -- -d 313938 -c'
 mqtt-cmd "help"
 mqtt-cmd "mqtt status"
 mqtt-cmd "app led on 0"
+```
+
+**Even Better - CLI Aliases:**
+```bash
+# Create a permanent alias for the CLI
+echo 'alias mqtt="node ~/work/alnicko-rapidreach-fw-937bea569e97/mqtt-terminal/dist/cli.js"' >> ~/.bashrc
+source ~/.bashrc
+
+# Now you can use it from anywhere:
+mqtt -d 313938 -c "app led on 0"
+mqtt -d 313938 -c "device id"
+mqtt -d 313938  # interactive mode
+
+# Or create a device-specific alias
+echo 'alias led="node ~/work/alnicko-rapidreach-fw-937bea569e97/mqtt-terminal/dist/cli.js -d 313938 -c"' >> ~/.bashrc
+source ~/.bashrc
+
+# Super simple LED control:
+led "app led on 0"
+led "app led off 0"
 ```
 
 ## Development

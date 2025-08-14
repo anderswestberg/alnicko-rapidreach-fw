@@ -3,10 +3,14 @@
   "version": "1.0.0",
   "description": "MQTT-based terminal for RapidReach device CLI",
   "main": "dist/index.js",
+  "bin": {
+    "mqtt-terminal": "./dist/cli.js"
+  },
   "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
+    "cli": "node dist/cli.js",
     "shell": "tsc && node dist/mqtt-shell-terminal.js",
     "dev": "tsx src/index.ts",
     "test": "tsc && node dist/test-runner.js",
