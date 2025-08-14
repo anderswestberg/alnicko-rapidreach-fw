@@ -2844,18 +2844,15 @@ static int cmd_test(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
-/* ------------ Root rapidreach Command ------------ */
+/* ------------ Root app Command ------------ */
 SHELL_STATIC_SUBCMD_SET_CREATE(
-        sub_rapidreach,
+        sub_app,
         SHELL_CMD(led, &sub_led, "LED control", NULL),
         SHELL_CMD(watchdog, &sub_watchdog, "Watchdog control", NULL),
         SHELL_CMD(microphone, NULL, "Microphone control", cmd_microphone),
         SHELL_CMD(charger, &sub_charger, "Charger control", NULL),
         SHELL_CMD(battery, NULL, "Battery status", cmd_battery_get_status),
         SHELL_CMD(net, &sub_internet, "Internet control", NULL),
-#ifdef CONFIG_RPR_MODULE_MQTT
-        SHELL_CMD(mqtt, &sub_mqtt, "MQTT client control", NULL),
-#endif
         SHELL_CMD(info, NULL, "Print device info", cmd_device_info),
         SHELL_CMD(audio, &audio_cmds, "Audio player commands", NULL),
         SHELL_CMD_ARG(switch,
@@ -2870,4 +2867,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(test, NULL, "Test command", cmd_test),
         SHELL_SUBCMD_SET_END);
 
-SHELL_CMD_REGISTER(rapidreach, &sub_rapidreach, "RapidReach commands", NULL);
+SHELL_CMD_REGISTER(app, &sub_app, "Application commands", NULL);
+#ifdef CONFIG_RPR_MODULE_MQTT
+SHELL_CMD_REGISTER(mqtt, &sub_mqtt, "MQTT client control", NULL);
+#endif

@@ -9,14 +9,22 @@ export class InteractiveTerminal {
   private isRunning = false;
   private commandHistory: string[] = [];
   private historyIndex = -1;
+  private deviceId: string;
+  private customPrompt: string;
 
-  constructor(mqttClient: MqttTerminal) {
+  constructor(mqttClient: MqttTerminal, deviceId: string) {
     this.mqttClient = mqttClient;
+    this.deviceId = deviceId;
+    
+    // Create prompt like "mqtt-313938:~$ "
+    const shortId = deviceId.substring(0, 6);
+    this.customPrompt = chalk.green(`mqtt-${shortId}`) + chalk.gray(':~$ ');
+    
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
       terminal: true,
-      prompt: config.terminal.prompt,
+      prompt: this.customPrompt,
     });
 
     this.setupReadline();
@@ -66,10 +74,12 @@ export class InteractiveTerminal {
   async start(): Promise<void> {
     this.isRunning = true;
     
+    const shortId = this.deviceId.substring(0, 6);
     console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════╗'));
-    console.log(chalk.cyan('║') + chalk.white.bold('          RapidReach MQTT Terminal v1.0.0                   ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white.bold('          RapidReach MQTT Shell Terminal v2.0               ') + chalk.cyan('║'));
     console.log(chalk.cyan('╚════════════════════════════════════════════════════════════╝'));
     console.log();
+    console.log(chalk.green(`Connected to device: ${shortId}`));
     console.log(chalk.gray('Type commands to send to device, "exit" to quit'));
     console.log(chalk.gray('Use ↑/↓ for command history'));
     console.log();
