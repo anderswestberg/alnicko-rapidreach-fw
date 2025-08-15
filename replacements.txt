@@ -1,0 +1,6 @@
+# Static replacements
+7e365f775657dc0e==><EMQX_USERNAME>
+V9ARSrIt6BO9A38rcI9B5DpwciDmOSuEqdCkHYLZ7R9AOrA==><EMQX_PASSWORD>
+HUbXsY1pYaGDKL==><JIRA_PASSWORD>
+# Regex replacements
+regex:sk-proj-[A-Za-z0-9_\-]+==><OPENAI_API_KEY>
