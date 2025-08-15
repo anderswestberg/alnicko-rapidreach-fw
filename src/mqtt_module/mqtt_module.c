@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include "../dev_info/dev_info.h"
 
 LOG_MODULE_REGISTER(mqtt_module, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
@@ -23,6 +24,7 @@ static struct mqtt_client client;
 static struct sockaddr_storage broker;
 static uint8_t rx_buffer[128];
 static uint8_t tx_buffer[128];
+static char client_id_buffer[32];  /* Buffer for "rr-speaker-XXXXX" format */
 
 /* Heartbeat task control */
 static struct k_work_delayable heartbeat_work;
@@ -359,11 +361,17 @@ static int prepare_mqtt_client(void)
     /* Initialize MQTT client */
     mqtt_client_init(&client);
 
+    /* Generate client ID in format "XXXXXX-speaker" (6 digits only) */
+    size_t device_id_len;
+    const char *device_id = dev_info_get_device_id_str(&device_id_len);
+    snprintf(client_id_buffer, sizeof(client_id_buffer), "%.6s-speaker", device_id);
+    LOG_INF("MQTT client ID: %s", client_id_buffer);
+    
     /* MQTT client configuration */
     client.broker = &broker;
     client.evt_cb = mqtt_evt_handler;
-    client.client_id.utf8 = (uint8_t *)CONFIG_RPR_MQTT_CLIENT_ID;
-    client.client_id.size = strlen(CONFIG_RPR_MQTT_CLIENT_ID);
+    client.client_id.utf8 = (uint8_t *)client_id_buffer;
+    client.client_id.size = strlen(client_id_buffer);
     /* Credentials (optional) */
 #ifdef CONFIG_RPR_MQTT_USERNAME
     static struct mqtt_utf8 username = {
@@ -777,7 +785,8 @@ mqtt_status_t mqtt_module_unsubscribe(const char *topic)
 
 /* Auto-initialize MQTT module during system startup */
 #ifdef CONFIG_RPR_MODULE_MQTT
-SYS_INIT(mqtt_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+/* Module initialization is now done after network connectivity is established */
+/* SYS_INIT(mqtt_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY); */
 #endif
 
 #endif /* CONFIG_RPR_MODULE_MQTT */

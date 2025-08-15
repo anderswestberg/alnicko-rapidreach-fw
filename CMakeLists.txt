@@ -16,3 +16,8 @@ add_subdirectory(src)
 
 target_sources(app PRIVATE src/main/main.c)
 
+# Link HTTP log client if enabled
+if(CONFIG_HTTP_LOG_CLIENT)
+    target_link_libraries(app PUBLIC http_log_client)
+endif()
+

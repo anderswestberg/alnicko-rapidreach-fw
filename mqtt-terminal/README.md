@@ -298,7 +298,7 @@ mqtt-cmd "app led on 0"
 **Even Better - CLI Aliases:**
 ```bash
 # Create a permanent alias for the CLI
-echo 'alias mqtt="node ~/work/alnicko-rapidreach-fw-937bea569e97/mqtt-terminal/dist/cli.js"' >> ~/.bashrc
+echo 'alias mqtt="node ~/work/alnicko-rapidreach-fw/mqtt-terminal/dist/cli.js"' >> ~/.bashrc
 source ~/.bashrc
 
 # Now you can use it from anywhere:
@@ -307,7 +307,7 @@ mqtt -d 313938 -c "device id"
 mqtt -d 313938  # interactive mode
 
 # Or create a device-specific alias
-echo 'alias led="node ~/work/alnicko-rapidreach-fw-937bea569e97/mqtt-terminal/dist/cli.js -d 313938 -c"' >> ~/.bashrc
+echo 'alias led="node ~/work/alnicko-rapidreach-fw/mqtt-terminal/dist/cli.js -d 313938 -c"' >> ~/.bashrc
 source ~/.bashrc
 
 # Super simple LED control:

@@ -18,6 +18,7 @@
 #include <zephyr/fs/fs.h>
 #include <zephyr/net/socket.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "battery.h"
 #include "charger.h"
