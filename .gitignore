@@ -63,3 +63,5 @@ compile_commands.json
 firmware_updates
 mqtt/data/mosquitto.db
 mqtt/config/mosquitto.conf
+
+.env
