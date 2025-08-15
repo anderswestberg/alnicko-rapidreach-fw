@@ -230,14 +230,7 @@ static void flush_work_handler(struct k_work *work)
     
     k_mutex_lock(&log_client.mutex, K_FOREVER);
     
-    /* Copy up to batch_size entries from RAM buffer first */
-    while (batch_count < log_client.config.batch_size && log_client.count > 0) {
-        batch[batch_count++] = log_client.buffer[log_client.tail];
-        log_client.tail = (log_client.tail + 1) % log_client.config.buffer_size;
-        log_client.count--;
-    }
-    
-    /* If we have room and filesystem logs, read from filesystem */
+    /* First: Read older logs from filesystem (oldest first due to FIFO) */
     while (batch_count < log_client.config.batch_size && log_client.fs_log_count > 0) {
         if (fs_log_read(&batch[batch_count]) == 0) {
             batch_count++;
@@ -246,6 +239,13 @@ static void flush_work_handler(struct k_work *work)
             LOG_WRN("Failed to read log from filesystem");
             break;
         }
+    }
+    
+    /* Then: Read newer logs from RAM buffer (also oldest first due to circular buffer) */
+    while (batch_count < log_client.config.batch_size && log_client.count > 0) {
+        batch[batch_count++] = log_client.buffer[log_client.tail];
+        log_client.tail = (log_client.tail + 1) % log_client.config.buffer_size;
+        log_client.count--;
     }
     
     k_mutex_unlock(&log_client.mutex);
@@ -453,6 +453,40 @@ int http_log_flush(void)
     
     /* Flush all logs in batches - use static buffer to avoid stack overflow */
     static struct log_entry flush_batch[CONFIG_HTTP_LOG_CLIENT_MAX_BATCH_SIZE];
+    
+    /* First: Flush all filesystem logs (older logs) */
+    while (log_client.fs_log_count > 0) {
+        uint16_t batch_count = 0;
+        
+        k_mutex_lock(&log_client.mutex, K_FOREVER);
+        
+        /* Read filesystem logs into batch */
+        while (batch_count < log_client.config.batch_size && log_client.fs_log_count > 0) {
+            if (fs_log_read(&flush_batch[batch_count]) == 0) {
+                batch_count++;
+                log_client.fs_log_count--;
+            } else {
+                LOG_WRN("Failed to read log from filesystem during flush");
+                break;
+            }
+        }
+        
+        k_mutex_unlock(&log_client.mutex);
+        
+        if (batch_count > 0) {
+            if (send_log_batch(flush_batch, batch_count) == 0) {
+                total_sent += batch_count;
+                log_client.logs_sent += batch_count;
+            } else {
+                /* On failure, we can't put filesystem logs back easily, so just log and continue */
+                LOG_ERR("Failed to send filesystem logs during flush");
+                log_client.send_failures++;
+                break;
+            }
+        }
+    }
+    
+    /* Then: Flush all RAM buffer logs (newer logs) */
     while (log_client.count > 0) {
         uint16_t batch_count = 0;
         

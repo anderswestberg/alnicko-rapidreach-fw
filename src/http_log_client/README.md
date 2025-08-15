@@ -10,6 +10,8 @@ This module provides buffered, batched HTTP log transmission from the RapidReach
 - **Buffer Overflow Protection**: When buffer is full, oldest logs are dropped with a warning
 - **Non-blocking Operation**: Log submission is asynchronous and won't block your application
 - **Statistics**: Track sent, dropped, and failed log counts
+- **Filesystem Overflow**: Optional filesystem storage for logs when RAM buffer is full
+- **Chronological Ordering**: Logs are sent in correct time order, with filesystem logs (older) sent before RAM logs (newer)
 
 ## Configuration
 
@@ -98,6 +100,16 @@ The module implements exponential backoff for failed transmissions:
 3. Maximum backoff of 60 seconds
 4. Reset to initial delay after successful transmission
 5. Skip sending attempts after 5 consecutive failures until next scheduled flush
+
+## Chronological Ordering
+
+The HTTP log client ensures logs are sent to the server in chronological order:
+
+1. **Filesystem logs are sent first** - These are older logs that overflowed when the RAM buffer was full
+2. **RAM buffer logs are sent second** - These are newer logs currently in memory
+3. **Both use FIFO ordering** - Within each storage type, oldest logs are sent first
+
+This design requires no sorting (saving memory on embedded devices) while guaranteeing that the log server receives entries in the correct time sequence. The implementation takes advantage of the fact that filesystem logs are always older than RAM logs by design.
 
 ## Buffer Management
 
