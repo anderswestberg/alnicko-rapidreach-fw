@@ -2,6 +2,7 @@ import mqtt, { MqttClient } from 'mqtt';
 import chalk from 'chalk';
 import { EventEmitter } from 'events';
 import { config } from './config.js';
+import { getLogger } from './logger.js';
 
 export interface MqttTerminalEvents {
   connected: () => void;
@@ -26,20 +27,27 @@ export class MqttTerminal extends EventEmitter {
   private responseTopic: string;
   private responseTimeout: number;
   private responseTimer: NodeJS.Timeout | null = null;
+  private quiet: boolean;
+  private logger: ReturnType<typeof getLogger>;
 
-  constructor(deviceId?: string) {
+  constructor(deviceId?: string, quiet: boolean = false) {
     super();
     this.deviceId = deviceId || config.device.id;
     this.commandTopic = config.device.commandTopic(this.deviceId);
     this.responseTopic = config.device.responseTopic(this.deviceId);
     this.responseTimeout = config.terminal.responseTimeout;
+    this.quiet = quiet;
+    this.logger = getLogger({ quiet: this.quiet });
   }
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const brokerUrl = `mqtt://${config.mqtt.brokerHost}:${config.mqtt.brokerPort}`;
       
-      console.log(chalk.yellow(`Connecting to MQTT broker at ${brokerUrl}...`));
+      if (!this.quiet) {
+        console.log(chalk.yellow(`Connecting to MQTT broker at ${brokerUrl}...`));
+      }
+      this.logger.info('Connecting to MQTT broker', { brokerUrl, deviceId: this.deviceId });
 
       this.client = mqtt.connect(brokerUrl, {
         clientId: config.mqtt.clientId,
@@ -50,17 +58,24 @@ export class MqttTerminal extends EventEmitter {
       });
 
       this.client.on('connect', () => {
-        console.log(chalk.green('✓ Connected to MQTT broker'));
-        console.log(chalk.blue(`Command topic: ${this.commandTopic}`));
-        console.log(chalk.blue(`Response topic: ${this.responseTopic}`));
+        if (!this.quiet) {
+          console.log(chalk.green('✓ Connected to MQTT broker'));
+          console.log(chalk.blue(`Command topic: ${this.commandTopic}`));
+          console.log(chalk.blue(`Response topic: ${this.responseTopic}`));
+        }
+        this.logger.info('Connected to MQTT broker');
         
         // Subscribe to response topic
         this.client!.subscribe(this.responseTopic, { qos: 1 }, (err) => {
           if (err) {
             console.error(chalk.red('Failed to subscribe to response topic:'), err);
+            this.logger.error('Failed to subscribe to response topic', { error: err.message, topic: this.responseTopic });
             reject(err);
           } else {
-            console.log(chalk.green(`✓ Subscribed to ${this.responseTopic}`));
+            if (!this.quiet) {
+              console.log(chalk.green(`✓ Subscribed to ${this.responseTopic}`));
+            }
+            this.logger.info('Subscribed to response topic', { topic: this.responseTopic });
             this.emit('connected');
             resolve();
           }
@@ -77,12 +92,14 @@ export class MqttTerminal extends EventEmitter {
 
       this.client.on('error', (error) => {
         console.error(chalk.red('MQTT error:'), error);
+        this.logger.error('MQTT client error', { error: error.message });
         this.emit('error', error);
         reject(error);
       });
 
       this.client.on('close', () => {
         console.log(chalk.yellow('MQTT connection closed'));
+        this.logger.info('MQTT connection closed');
         this.emit('disconnected');
       });
 
@@ -106,7 +123,8 @@ export class MqttTerminal extends EventEmitter {
 
       const responseHandler = (response: string) => {
         gotAnyChunk = true;
-        buffer += buffer.length ? `\n${response}` : response;
+        // Don't add newlines between chunks - they might be mid-word splits
+        buffer += response;
         if (settleTimer) clearTimeout(settleTimer);
         settleTimer = setTimeout(() => {
           this.clearResponseTimeout();

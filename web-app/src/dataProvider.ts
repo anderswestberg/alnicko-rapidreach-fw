@@ -1,0 +1,142 @@
+import type { DataProvider } from 'react-admin';
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
+const API_KEY = import.meta.env.VITE_API_KEY || 'your-secure-api-key-here';
+
+const apiClient = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'X-API-Key': API_KEY,
+  },
+});
+
+// Generic data provider that works with the new data provider API
+export const dataProvider: DataProvider = {
+  getList: async (resource: string, params: any) => {
+    const { page = 1, perPage = 10 } = params.pagination || {};
+    const { field = 'id', order = 'ASC' } = params.sort || {};
+    const { filter } = params;
+
+    const query = new URLSearchParams();
+    
+    // Add sort parameter
+    query.append('sort', JSON.stringify([field, order]));
+    
+    // Add range parameter (React-Admin uses 0-based indexing)
+    const start = (page - 1) * perPage;
+    const end = start + perPage - 1;
+    query.append('range', JSON.stringify([start, end]));
+    
+    // Add filter parameter
+    if (filter && Object.keys(filter).length > 0) {
+      query.append('filter', JSON.stringify(filter));
+    }
+
+    const response = await apiClient.get(`/dataprovider/${resource}?${query.toString()}`);
+    
+    // Extract total from Content-Range header or X-Total-Count
+    const contentRange = response.headers['content-range'];
+    const xTotalCount = response.headers['x-total-count'];
+    const total = contentRange 
+      ? parseInt(contentRange.split('/')[1]) 
+      : xTotalCount 
+      ? parseInt(xTotalCount)
+      : response.data.length;
+
+    return {
+      data: response.data,
+      total,
+    };
+  },
+
+  getOne: async (resource: string, params: any) => {
+    const response = await apiClient.get(`/dataprovider/${resource}/${params.id}`);
+    return { data: response.data };
+  },
+
+  getMany: async (resource: string, params: any) => {
+    // Use getList with an id filter
+    const query = new URLSearchParams();
+    query.append('filter', JSON.stringify({ id: params.ids }));
+    
+    const response = await apiClient.get(`/dataprovider/${resource}?${query.toString()}`);
+    return { data: response.data };
+  },
+
+  getManyReference: async (resource: string, params: any) => {
+    const { page = 1, perPage = 10 } = params.pagination || {};
+    const { field = 'id', order = 'ASC' } = params.sort || {};
+    const filter = { ...params.filter, [params.target]: params.id };
+
+    const query = new URLSearchParams();
+    query.append('sort', JSON.stringify([field, order]));
+    
+    const start = (page - 1) * perPage;
+    const end = start + perPage - 1;
+    query.append('range', JSON.stringify([start, end]));
+    query.append('filter', JSON.stringify(filter));
+
+    const response = await apiClient.get(`/dataprovider/${resource}?${query.toString()}`);
+    
+    const contentRange = response.headers['content-range'];
+    const xTotalCount = response.headers['x-total-count'];
+    const total = contentRange 
+      ? parseInt(contentRange.split('/')[1]) 
+      : xTotalCount 
+      ? parseInt(xTotalCount)
+      : response.data.length;
+
+    return {
+      data: response.data,
+      total,
+    };
+  },
+
+  create: async (resource: string, params: any) => {
+    const response = await apiClient.post(`/dataprovider/${resource}`, params.data);
+    return { data: response.data };
+  },
+
+  update: async (resource: string, params: any) => {
+    // Special handling for device commands
+    if (resource === 'devices' && params.data.command) {
+      const response = await apiClient.post(
+        `/devices/${params.id}/execute`,
+        { command: params.data.command }
+      );
+      return { data: { ...params.data, output: response.data.output } };
+    }
+    
+    // Generic update
+    const response = await apiClient.put(`/dataprovider/${resource}/${params.id}`, params.data);
+    return { data: response.data };
+  },
+
+  updateMany: async (resource: string, params: any) => {
+    const response = await apiClient.put(`/dataprovider/${resource}`, {
+      ids: params.ids,
+      data: params.data,
+    });
+    return { data: response.data.data || params.ids };
+  },
+
+  delete: async (resource: string, params: any) => {
+    const response = await apiClient.delete(`/dataprovider/${resource}/${params.id}`);
+    return { data: response.data };
+  },
+
+  deleteMany: async (resource: string, params: any) => {
+    const query = new URLSearchParams();
+    query.append('filter', JSON.stringify({ id: params.ids }));
+    
+    const response = await apiClient.delete(`/dataprovider/${resource}?${query.toString()}`);
+    return { data: response.data.data || params.ids };
+  },
+};
+
+// Helper function to get device stats (using the original endpoint)
+export const getDeviceStats = async () => {
+  const { data } = await apiClient.get('/devices/stats');
+  return data.stats;
+};

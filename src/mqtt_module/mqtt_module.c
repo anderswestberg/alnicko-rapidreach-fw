@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include "../dev_info/dev_info.h"
 
 LOG_MODULE_REGISTER(mqtt_module, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
@@ -23,6 +24,7 @@ static struct mqtt_client client;
 static struct sockaddr_storage broker;
 static uint8_t rx_buffer[128];
 static uint8_t tx_buffer[128];
+static char client_id_buffer[32];  /* Buffer for "rr-speaker-XXXXX" format */
 
 /* Heartbeat task control */
 static struct k_work_delayable heartbeat_work;
@@ -39,7 +41,11 @@ static bool mqtt_thread_running = false;
 /* Auto-reconnection state */
 static bool auto_reconnect_enabled = true;
 static int64_t last_reconnect_attempt = 0;
-static int reconnect_interval_ms = 10000; /* 10 seconds between reconnection attempts */
+static int reconnect_interval_ms = 5000; /* Start with 5 seconds */
+static int reconnect_attempts = 0;
+#define MIN_RECONNECT_INTERVAL_MS 5000    /* 5 seconds minimum */
+#define MAX_RECONNECT_INTERVAL_MS 300000  /* 5 minutes maximum */
+#define RECONNECT_BACKOFF_MULTIPLIER 2    /* Double the interval each failure */
 
 /* Subscription management */
 #define MAX_SUBSCRIPTIONS 8
@@ -74,6 +80,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         } else {
             LOG_INF("MQTT client connected!");
             mqtt_connected = true;
+            /* Reset reconnection backoff on successful connection */
+            reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+            reconnect_attempts = 0;
         }
         break;
 
@@ -259,13 +268,26 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
         } else if (auto_reconnect_enabled) {
             /* Attempt auto-reconnection if enough time has passed */
             if (current_time - last_reconnect_attempt >= reconnect_interval_ms) {
-                LOG_INF("Auto-reconnecting to MQTT broker...");
+                LOG_INF("Auto-reconnecting to MQTT broker (attempt %d, wait %d ms)...", 
+                        reconnect_attempts + 1, reconnect_interval_ms);
                 ret = mqtt_internal_connect();
                 if (ret == 0) {
                     /* Wait a bit for the connection to establish */
                     k_sleep(K_MSEC(100));
                     /* Process any incoming CONNACK */
                     mqtt_input(&client);
+                    /* Reset backoff on successful connection attempt */
+                    reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+                    reconnect_attempts = 0;
+                } else {
+                    /* Connection failed, apply exponential backoff */
+                    reconnect_attempts++;
+                    reconnect_interval_ms = reconnect_interval_ms * RECONNECT_BACKOFF_MULTIPLIER;
+                    if (reconnect_interval_ms > MAX_RECONNECT_INTERVAL_MS) {
+                        reconnect_interval_ms = MAX_RECONNECT_INTERVAL_MS;
+                    }
+                    LOG_WRN("Reconnect failed, next attempt in %d seconds", 
+                            reconnect_interval_ms / 1000);
                 }
                 last_reconnect_attempt = current_time;
             }
@@ -339,11 +361,17 @@ static int prepare_mqtt_client(void)
     /* Initialize MQTT client */
     mqtt_client_init(&client);
 
+    /* Generate client ID in format "XXXXXX-speaker" (6 digits only) */
+    size_t device_id_len;
+    const char *device_id = dev_info_get_device_id_str(&device_id_len);
+    snprintf(client_id_buffer, sizeof(client_id_buffer), "%.6s-speaker", device_id);
+    LOG_INF("MQTT client ID: %s", client_id_buffer);
+    
     /* MQTT client configuration */
     client.broker = &broker;
     client.evt_cb = mqtt_evt_handler;
-    client.client_id.utf8 = (uint8_t *)CONFIG_RPR_MQTT_CLIENT_ID;
-    client.client_id.size = strlen(CONFIG_RPR_MQTT_CLIENT_ID);
+    client.client_id.utf8 = (uint8_t *)client_id_buffer;
+    client.client_id.size = strlen(client_id_buffer);
     /* Credentials (optional) */
 #ifdef CONFIG_RPR_MQTT_USERNAME
     static struct mqtt_utf8 username = {
@@ -432,9 +460,8 @@ mqtt_status_t mqtt_module_connect(void)
         return MQTT_SUCCESS;
     }
 
-    /* Enable auto-reconnection */
-    auto_reconnect_enabled = true;
-
+    /* Don't enable auto-reconnection here - let user enable it after successful connection */
+    
     ret = mqtt_internal_connect();
     if (ret != 0) {
         LOG_ERR("Failed to initiate MQTT connection: %d", ret);
@@ -546,24 +573,35 @@ mqtt_status_t mqtt_module_publish(const char *topic, const char *payload, size_t
 mqtt_status_t mqtt_send_heartbeat(void)
 {
     static uint32_t sequence_number = 0;
-    char payload[64];
+    char payload[128];
+    char topic[64];
     int ret;
 
     if (!mqtt_connected) {
         return MQTT_ERR_CONNECTION_FAILED;
     }
 
-    /* Create heartbeat payload */
+    /* Create heartbeat topic with client ID */
+    ret = snprintf(topic, sizeof(topic), "%s/%s", 
+                   CONFIG_RPR_MQTT_HEARTBEAT_TOPIC, client_id_buffer);
+    if (ret < 0 || ret >= sizeof(topic)) {
+        LOG_ERR("Failed to create heartbeat topic");
+        return MQTT_ERR_PUBLISH_FAILED;
+    }
+
+    /* Create heartbeat payload with device info */
     ret = snprintf(payload, sizeof(payload), 
-                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu}",
-                   sequence_number++, k_uptime_get());
+                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu,\"deviceId\":\"%s\",\"version\":\"%s\"}",
+                   sequence_number++, k_uptime_get() / 1000, /* Convert to seconds */
+                   client_id_buffer, "1.0.0");
     
     if (ret < 0 || ret >= sizeof(payload)) {
         LOG_ERR("Failed to create heartbeat payload");
         return MQTT_ERR_PUBLISH_FAILED;
     }
 
-    return mqtt_module_publish(CONFIG_RPR_MQTT_HEARTBEAT_TOPIC, payload, strlen(payload));
+    LOG_DBG("Publishing heartbeat to %s: %s", topic, payload);
+    return mqtt_module_publish(topic, payload, strlen(payload));
 }
 
 bool mqtt_is_connected(void)
@@ -758,7 +796,8 @@ mqtt_status_t mqtt_module_unsubscribe(const char *topic)
 
 /* Auto-initialize MQTT module during system startup */
 #ifdef CONFIG_RPR_MODULE_MQTT
-SYS_INIT(mqtt_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+/* Module initialization is now done after network connectivity is established */
+/* SYS_INIT(mqtt_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY); */
 #endif
 
 #endif /* CONFIG_RPR_MODULE_MQTT */

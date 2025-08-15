@@ -26,25 +26,36 @@ program
   .name('mqtt-terminal')
   .description('MQTT-based terminal for RapidReach device CLI')
   .version('1.0.0')
-  .option('-h, --host <host>', 'MQTT broker host', config.mqtt.brokerHost)
-  .option('-p, --port <port>', 'MQTT broker port', String(config.mqtt.brokerPort))
-.option('-d, --device <id>', 'Device ID (hex, e.g. 313938...)', config.device.id)
-  .option('-u, --username <username>', 'MQTT username')
-  .option('-P, --password <password>', 'MQTT password')
+  .option('-h, --host <host>', 'MQTT broker host', 'localhost')
+  .option('-p, --port <port>', 'MQTT broker port', '1883')
+  .option('-d, --device <id>', 'Device ID (required - use first 6 chars from EMQX dashboard)')
+  .option('-u, --username <username>', 'MQTT username', 'admin')
+  .option('-P, --password <password>', 'MQTT password', 'public')
   .option('-c, --command <cmd>', 'Execute single command and exit')
-  .option('--timeout <ms>', 'Response timeout in milliseconds', String(config.terminal.responseTimeout));
+  .option('--timeout <ms>', 'Response timeout in milliseconds', '5000');
 
 program.parse();
 
 const options = program.opts();
 
+// Check if device ID is provided
+if (!options.device) {
+  console.error(chalk.red('Error: Device ID is required'));
+  console.log(chalk.yellow('\nHow to find your device ID:'));
+  console.log('1. Check EMQX dashboard at http://localhost:18083 (login: admin/public)');
+  console.log('2. Look for your device in the Clients list');
+  console.log('3. Use the first 6 characters of the client ID\n');
+  console.log(chalk.gray('Example: npm run start -- -d 313938'));
+  process.exit(1);
+}
+
 // Override config with command line options
-if (options.host) config.mqtt.brokerHost = options.host;
-if (options.port) config.mqtt.brokerPort = parseInt(options.port);
-if (options.device) config.device.id = options.device;
-if (options.username) config.mqtt.username = options.username;
-if (options.password) config.mqtt.password = options.password;
-if (options.timeout) config.terminal.responseTimeout = parseInt(options.timeout);
+config.mqtt.brokerHost = options.host;
+config.mqtt.brokerPort = parseInt(options.port);
+config.device.id = options.device;
+config.mqtt.username = options.username;
+config.mqtt.password = options.password;
+config.terminal.responseTimeout = parseInt(options.timeout);
 
 async function main() {
   const mqttClient = new MqttTerminal(config.device.id);
@@ -65,7 +76,7 @@ async function main() {
       }
     } else {
       // Interactive mode
-      const terminal = new InteractiveTerminal(mqttClient);
+      const terminal = new InteractiveTerminal(mqttClient, config.device.id);
       await terminal.start();
     }
   } catch (error) {

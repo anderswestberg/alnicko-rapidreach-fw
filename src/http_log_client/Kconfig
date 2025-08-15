@@ -1,0 +1,61 @@
+# HTTP Log Client Configuration
+
+menuconfig HTTP_LOG_CLIENT
+	bool "HTTP Log Client support"
+	depends on NETWORKING && HTTP_CLIENT
+	help
+	  Enable HTTP log client for sending device logs to a centralized
+	  log server. Logs are buffered locally and sent in batches to
+	  reduce network overhead.
+
+if HTTP_LOG_CLIENT
+
+config HTTP_LOG_CLIENT_LOG_LEVEL
+	int "HTTP Log Client log level"
+	default 3
+	help
+	  Log level for HTTP log client module (0=OFF, 1=ERR, 2=WRN, 3=INF, 4=DBG)
+
+config HTTP_LOG_CLIENT_MAX_BATCH_SIZE
+	int "Maximum logs per batch"
+	default 50
+	range 10 200
+	help
+	  Maximum number of log entries to send in a single HTTP request.
+	  Larger batches are more efficient but require more memory.
+
+config HTTP_LOG_CLIENT_DEFAULT_BUFFER_SIZE
+	int "Default log buffer size"
+	default 500
+	range 100 2000
+	help
+	  Default number of log entries that can be buffered before
+	  oldest entries are dropped. Can be overridden at runtime.
+
+config HTTP_LOG_CLIENT_STACK_SIZE
+	int "HTTP log client thread stack size"
+	default 4096
+	help
+	  Stack size for the HTTP log client worker thread.
+
+config HTTP_LOG_CLIENT_THREAD_PRIORITY
+	int "HTTP log client thread priority"
+	default 10
+	help
+	  Priority of the HTTP log client worker thread.
+	  Lower values mean higher priority.
+
+config HTTP_LOG_CLIENT_DEFAULT_SERVER_URL
+	string "Default log server URL"
+	default "http://192.168.2.62:3000"
+	help
+	  Default URL of the log server. Can be overridden at runtime.
+
+config HTTP_LOG_CLIENT_COMPRESSION
+	bool "Enable log compression"
+	default n
+	help
+	  Enable gzip compression for log payloads. Reduces bandwidth
+	  but increases CPU usage.
+
+endif # HTTP_LOG_CLIENT

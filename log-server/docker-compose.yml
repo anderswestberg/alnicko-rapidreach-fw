@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  emqx:
+    image: emqx/emqx:5.3.2
+    container_name: rapidreach-emqx
+    ports:
+      - "1883:1883"   # MQTT TCP
+      - "8883:8883"   # MQTT SSL
+      - "8083:8083"   # MQTT WebSocket
+      - "8084:8084"   # MQTT WSS
+      - "18083:18083" # Dashboard
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_HOST=127.0.0.1
+      - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=public
+      - EMQX_ALLOW_ANONYMOUS=false
+      - EMQX_AUTH__USER__1__USERNAME=admin
+      - EMQX_AUTH__USER__1__PASSWORD=public
+      - EMQX_ACL_NOMATCH=allow
+      - EMQX_ACL_FILE_ENABLE=off
+    volumes:
+      - emqx-data:/opt/emqx/data
+      - emqx-log:/opt/emqx/log
+    restart: unless-stopped
+    networks:
+      - rapidreach-net
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  log-server:
+    build: .
+    container_name: rapidreach-log-server
+    ports:
+      - "3001:3000"  # Map to 3001 to avoid conflicts
+    environment:
+      - PORT=3000
+      - LOG_DIR=/app/logs
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - rapidreach-net
+    depends_on:
+      - emqx
+
+  device-server:
+    build: ../device-server
+    container_name: rapidreach-device-server
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - MQTT_BROKER_HOST=emqx
+      - MQTT_BROKER_PORT=1883
+      - MQTT_USERNAME=admin
+      - MQTT_PASSWORD=public
+      - API_KEY=your-secure-api-key-here
+      - LOG_SERVER_URL=http://log-server:3000
+    restart: unless-stopped
+    networks:
+      - rapidreach-net
+    depends_on:
+      - emqx
+      - log-server
+
+volumes:
+  emqx-data:
+  emqx-log:
+
+networks:
+  rapidreach-net:
+    driver: bridge
+    name: rapidreach

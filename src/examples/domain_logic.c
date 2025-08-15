@@ -13,6 +13,7 @@
 
 #include <zephyr/kernel.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "domain_logic.h"
 #include "power_supervisor.h"
@@ -45,7 +46,14 @@
 
 #ifdef CONFIG_RPR_MODULE_HTTP
 #include "alnicko_server.h"
+#endif
 
+#ifdef CONFIG_HTTP_LOG_CLIENT
+#include "http_log_client.h"
+#endif
+
+#ifdef CONFIG_RPR_MODULE_MQTT
+#include "../mqtt_module/mqtt_module.h"
 #endif
 
 #ifdef CONFIG_RPR_MODULE_DFU
@@ -97,6 +105,11 @@ static struct network_context net_ctx = {
     .domain_ping_count = 0,
     .audio_ping_count  = 0,
 };
+
+#ifdef CONFIG_HTTP_LOG_CLIENT
+/* Forward declaration */
+static void init_http_log_client(void);
+#endif
 
 /**
  * @brief Callback for short press of the power-off button.
@@ -285,6 +298,31 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
         LOG_INF("Network connected");
         net_ctx.connected = true;
         led_on(NET_LINK_LED);
+        
+#ifdef CONFIG_HTTP_LOG_CLIENT
+        /* Initialize HTTP log client now that we have network */
+        init_http_log_client();
+#endif
+
+#ifdef CONFIG_RPR_MODULE_MQTT
+        /* Initialize MQTT module now that we have network */
+        int ret = mqtt_init();
+        if (ret == 0) {
+            LOG_INF("MQTT module initialized");
+            /* Connect to MQTT broker */
+            mqtt_status_t status = mqtt_module_connect();
+            if (status == MQTT_SUCCESS) {
+                LOG_INF("MQTT connection initiated");
+                /* Start heartbeat */
+                mqtt_start_heartbeat();
+            } else {
+                LOG_ERR("Failed to connect to MQTT broker: %d", status);
+            }
+        } else {
+            LOG_ERR("Failed to initialize MQTT module: %d", ret);
+        }
+#endif
+        
         k_sem_give(&net_ctx.net_app_sem);
         return;
     }
@@ -642,6 +680,40 @@ void network_attempt_connect(void)
 #endif
     LOG_WRN("Failed to connect to any network interface");
 }
+
+#ifdef CONFIG_HTTP_LOG_CLIENT
+/**
+ * @brief Initialize HTTP log client after network connection
+ */
+static void init_http_log_client(void)
+{
+    size_t device_id_len;
+    const char *device_id = dev_info_get_device_id_str(&device_id_len);
+    
+    struct http_log_config log_config = {
+        .server_url = CONFIG_HTTP_LOG_CLIENT_DEFAULT_SERVER_URL,
+        .device_id = device_id,
+        .batch_size = 10,  /* Reduced to prevent stack overflow */
+        .flush_interval_ms = 5000,
+        .buffer_size = 100,  /* Reduced from 500 to fit in available RAM */
+        .enable_compression = false
+    };
+    
+    http_log_status_t ret = http_log_init(&log_config);
+    if (ret == HTTP_LOG_SUCCESS) {
+        LOG_INF("HTTP log client initialized for device: %s", device_id);
+        /* Use direct function call instead of macro to avoid LOG_MODULE_NAME issue */
+        ret = http_log_add(LOG_LEVEL_INF, "domain_logic", "Device connected and logging enabled");
+        if (ret != HTTP_LOG_SUCCESS) {
+            LOG_ERR("Failed to add test log: %d", ret);
+        } else {
+            LOG_INF("Test log added successfully");
+        }
+    } else {
+        LOG_ERR("Failed to initialize HTTP log client: %d", ret);
+    }
+}
+#endif
 
 #ifdef CONFIG_RPR_MODULE_HTTP
 /**

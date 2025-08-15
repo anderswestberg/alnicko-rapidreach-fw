@@ -58,30 +58,132 @@ Options:
 
 ## Usage
 
+### CLI Mode (Recommended)
+
+The `mqtt-terminal` can now be used directly as a command-line tool, making it much more convenient for scripting and automation:
+
+```bash
+# Interactive mode
+node dist/cli.js -d <device_id> [options]
+
+# Single command mode
+node dist/cli.js -d <device_id> -c "<command>" [options]
+
+# Using npm script
+npm run cli -- -d <device_id> -c "<command>" [options]
+```
+
+**CLI Options:**
+```
+Options:
+  -V, --version              output the version number
+  -d, --device <id>          Device ID (required)
+  -h, --host <host>          MQTT broker host (default: "192.168.2.62")
+  -p, --port <port>          MQTT broker port (default: "1883")
+  -u, --username <username>  MQTT username (default: "admin")
+  -w, --password <password>  MQTT password (default: "public")
+  -c, --command <cmd>        Execute single command and exit
+  --timeout <ms>             Response timeout in milliseconds (default: "5000")
+  -i, --interactive          Start interactive mode (default)
+  -v, --verbose              Enable verbose logging
+  --help                     display help for command
+```
+
+**CLI Examples:**
+```bash
+# Quick LED control
+node dist/cli.js -d 313938 -c "app led on 0"
+node dist/cli.js -d 313938 -c "app led off 0"
+
+# Get device info
+node dist/cli.js -d 313938 -c "device id"
+
+# Interactive session
+node dist/cli.js -d 313938
+
+# Custom broker
+node dist/cli.js -d 313938 -h 192.168.2.62 -c "mqtt status"
+```
+
+### Legacy npm Mode
+
+You can still use the old npm-based approach:
+
+#### Finding Your Device ID
+
+1. **From EMQX Dashboard** (easiest method):
+   - Navigate to http://localhost:18083 (login: admin/public)
+   - Go to "Clients" section
+   - Look for your device - it will show as a 6-character hex ID (e.g., `313938`)
+   - This is the client ID you use with mqtt-terminal
+
+2. From device boot logs:
+   ```
+   [00:00:00.352,000] <inf> dev_info: Device ID detected: 313938343233510e003d0029
+   ```
+
+3. From MQTT shell initialization logs:
+   ```
+   [00:14:50.469,000] <inf> shell_mqtt: Logs will be published to: devices/313938/tx
+   [00:14:50.469,000] <inf> shell_mqtt: Subscribing shell cmds from: devices/313938/rx
+   ```
+
+4. Via serial console:
+   ```
+   rapidreach> device id
+   ```
+
 ### Interactive Mode
 
 ```bash
-# Run with default settings
-npm start
+# Simple usage - only device ID is required!
+npm run start -- -d 313938
 
-# Or run directly
-node dist/index.js
+# Or with full device ID
+npm run start -- -d 313938343233510e003d0029
 
-# With custom broker
-node dist/index.js -h 192.168.1.100 -p 1883
+# Custom broker (if not using localhost)
+npm run start -- -d 313938 -h 192.168.2.62
+
+# All options have sensible defaults:
+# - host: localhost
+# - port: 1883
+# - username: admin
+# - password: public
+# - timeout: 5000ms
 ```
 
 ### Single Command Mode
 
+Execute a single command and exit - perfect for scripting and automation!
+
 ```bash
-# Execute a single command
-node dist/index.js -c "rapidreach info"
+# Execute a single command - super simple!
+npm run start -- -d 313938 -c "help"
 
-# Turn on LED
-node dist/index.js -c "rapidreach led on green"
+# Get device info
+npm run start -- -d 313938 -c "device id"
 
-# Check battery status
-node dist/index.js -c "rapidreach battery"
+# Check network status
+npm run start -- -d 313938 -c "net iface 1"
+
+# MQTT status
+npm run start -- -d 313938 -c "mqtt status"
+
+# LED control
+npm run start -- -d 313938 -c "app led on 0"
+npm run start -- -d 313938 -c "app led off 0"
+
+# Battery status
+npm run start -- -d 313938 -c "app battery"
+
+# Capture output to a file
+npm run start -- -d 313938 -c "help" > device_help.txt
+
+# Use in scripts
+DEVICE_ID=313938
+MQTT_STATUS=$(npm run start -- -d $DEVICE_ID -c "mqtt status" 2>/dev/null)
+echo "$MQTT_STATUS"
 ```
 
 ## Available Commands
@@ -113,44 +215,104 @@ In interactive mode, type `help` to see all available commands:
 ### Interactive Session
 
 ```
-$ npm start
-Connecting to MQTT broker at mqtt://192.168.2.62:1883...
+$ npm run start -- -d 313938
+Connecting to MQTT broker at mqtt://localhost:1883...
 ✓ Connected to MQTT broker
-✓ Subscribed to rapidreach/rapidreach_device/cli/response
+Command topic: devices/313938/rx
+Response topic: devices/313938/tx
+✓ Subscribed to devices/313938/tx
 
 ╔════════════════════════════════════════════════════════════╗
-║          RapidReach MQTT Terminal v1.0.0                   ║
+║          RapidReach MQTT Shell Terminal v2.0               ║
 ╚════════════════════════════════════════════════════════════╝
 
-Type "help" for available commands, "exit" to quit
-Use Tab for command completion, ↑/↓ for history
+Connected to device: 313938
+Type commands to send to device, "exit" to quit
+Use ↑/↓ for command history
 
-rapidreach> rapidreach info
-→ Sending: rapidreach info
-← Firmware version: V0.0.8
-← Hardware version: R01
-← Board name: Speaker Board
-← Device ID: 313938343233510e003d0029
+mqtt-313938:~$ help
+Available commands:
+  clear        : Clear screen.
+  date         : Date commands
+  device       : Device commands
+  devmem       : Read/write physical memory
+  fs           : File system commands
+  help         : Prints the help message.
+  history      : Command history.
+  kernel       : Kernel commands
+  net          : Networking commands
+  pm           : PM commands
+  rapidreach   : RapidReach commands
+  shell        : Useful, not Unix-like shell commands.
+  wifi         : Wi-Fi commands
 
-rapidreach> rapidreach led on green
-→ Sending: rapidreach led on green
-← OK
+mqtt-313938:~$ device id
+Device ID: 313938343233510e003d0029
 
-rapidreach> exit
+mqtt-313938:~$ net iface 1
+Interface eth0 (0x20008110) (Ethernet) [1]
+==================================
+Link addr : XX:XX:XX:XX:XX:XX
+MTU       : 1500
+Flags     : AUTO_START,IPv4,DHCP_OK
+IPv4 unicast addresses (max 1):
+    192.168.2.66/24 DHCP preferred
+
+mqtt-313938:~$ exit
+
 Disconnecting...
 ```
 
 ### Batch Commands
 
-Create a script file `commands.sh`:
+Create a script file `test-device.sh`:
 
 ```bash
 #!/bin/bash
-mqtt-terminal -c "rapidreach mqtt status"
-mqtt-terminal -c "rapidreach battery"
-mqtt-terminal -c "rapidreach led on red"
+DEVICE_ID=313938
+
+echo "=== Device Status Check ==="
+npm run start -- -d $DEVICE_ID -c "device id"
+npm run start -- -d $DEVICE_ID -c "mqtt status"
+npm run start -- -d $DEVICE_ID -c "app battery"
+npm run start -- -d $DEVICE_ID -c "net iface 1"
+
+echo -e "\n=== LED Test ==="
+npm run start -- -d $DEVICE_ID -c "app led on 0"
 sleep 2
-mqtt-terminal -c "rapidreach led off"
+npm run start -- -d $DEVICE_ID -c "app led off 0"
+
+echo -e "\n=== Test Complete ==="
+```
+
+Or use a simple alias for convenience:
+```bash
+alias mqtt-cmd='npm run start -- -d 313938 -c'
+
+# Then use it like:
+mqtt-cmd "help"
+mqtt-cmd "mqtt status"
+mqtt-cmd "app led on 0"
+```
+
+**Even Better - CLI Aliases:**
+```bash
+# Create a permanent alias for the CLI
+echo 'alias mqtt="node ~/work/alnicko-rapidreach-fw/mqtt-terminal/dist/cli.js"' >> ~/.bashrc
+source ~/.bashrc
+
+# Now you can use it from anywhere:
+mqtt -d 313938 -c "app led on 0"
+mqtt -d 313938 -c "device id"
+mqtt -d 313938  # interactive mode
+
+# Or create a device-specific alias
+echo 'alias led="node ~/work/alnicko-rapidreach-fw/mqtt-terminal/dist/cli.js -d 313938 -c"' >> ~/.bashrc
+source ~/.bashrc
+
+# Super simple LED control:
+led "app led on 0"
+led "app led off 0"
 ```
 
 ## Development
