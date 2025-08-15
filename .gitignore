@@ -48,6 +48,14 @@ Thumbs.db
 *.mov
 *.wmv
 
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+secrets/
+*.pem
+*.key
+
 # Zethyr files
 external/
 .venv
