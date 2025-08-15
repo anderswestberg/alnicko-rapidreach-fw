@@ -12,6 +12,37 @@ const executeCommandSchema = z.object({
 export function createDeviceRoutes(mqttClient: DeviceMqttClient): Router {
   const router = Router();
 
+  // Get device statistics
+  router.get('/devices/stats', (_req: Request, res: Response) => {
+    try {
+      const devices = mqttClient.getDevices();
+      const connectedCount = mqttClient.getConnectedDevicesCount();
+      
+      // Calculate device types
+      const deviceTypes = devices.reduce((acc, device) => {
+        acc[device.type] = (acc[device.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      res.json({
+        success: true,
+        stats: {
+          total: devices.length,
+          connected: connectedCount,
+          offline: devices.length - connectedCount,
+          byType: deviceTypes,
+          timestamp: new Date(),
+        },
+      });
+    } catch (error) {
+      logger.error('Error getting device stats:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+      });
+    }
+  });
+
   // Get all devices
   router.get('/devices', (_req: Request, res: Response) => {
     try {

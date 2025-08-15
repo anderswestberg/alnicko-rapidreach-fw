@@ -573,24 +573,35 @@ mqtt_status_t mqtt_module_publish(const char *topic, const char *payload, size_t
 mqtt_status_t mqtt_send_heartbeat(void)
 {
     static uint32_t sequence_number = 0;
-    char payload[64];
+    char payload[128];
+    char topic[64];
     int ret;
 
     if (!mqtt_connected) {
         return MQTT_ERR_CONNECTION_FAILED;
     }
 
-    /* Create heartbeat payload */
+    /* Create heartbeat topic with client ID */
+    ret = snprintf(topic, sizeof(topic), "%s/%s", 
+                   CONFIG_RPR_MQTT_HEARTBEAT_TOPIC, client_id_buffer);
+    if (ret < 0 || ret >= sizeof(topic)) {
+        LOG_ERR("Failed to create heartbeat topic");
+        return MQTT_ERR_PUBLISH_FAILED;
+    }
+
+    /* Create heartbeat payload with device info */
     ret = snprintf(payload, sizeof(payload), 
-                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu}",
-                   sequence_number++, k_uptime_get());
+                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu,\"deviceId\":\"%s\",\"version\":\"%s\"}",
+                   sequence_number++, k_uptime_get() / 1000, /* Convert to seconds */
+                   client_id_buffer, "1.0.0");
     
     if (ret < 0 || ret >= sizeof(payload)) {
         LOG_ERR("Failed to create heartbeat payload");
         return MQTT_ERR_PUBLISH_FAILED;
     }
 
-    return mqtt_module_publish(CONFIG_RPR_MQTT_HEARTBEAT_TOPIC, payload, strlen(payload));
+    LOG_DBG("Publishing heartbeat to %s: %s", topic, payload);
+    return mqtt_module_publish(topic, payload, strlen(payload));
 }
 
 bool mqtt_is_connected(void)

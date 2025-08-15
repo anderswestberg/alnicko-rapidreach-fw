@@ -21,6 +21,8 @@ export class DeviceMqttClient extends EventEmitter {
     reject: (reason: any) => void;
     timeout: NodeJS.Timeout;
   }> = new Map();
+  private deviceTimeoutInterval: NodeJS.Timeout | null = null;
+  private readonly DEVICE_TIMEOUT_MS = 60000; // Consider device offline after 60 seconds
 
   constructor() {
     super();
@@ -36,6 +38,7 @@ export class DeviceMqttClient extends EventEmitter {
     });
 
     this.setupEventHandlers();
+    this.startDeviceTimeoutCheck();
   }
 
   private setupEventHandlers(): void {
@@ -48,6 +51,7 @@ export class DeviceMqttClient extends EventEmitter {
       const patterns = [
         'devices/+/tx',           // All device responses
         'rapidreach/+/shell/out', // For the other MQTT shell pattern
+        'rapidreach/heartbeat/+', // Device heartbeat messages
       ];
       
       patterns.forEach(pattern => {
@@ -104,6 +108,28 @@ export class DeviceMqttClient extends EventEmitter {
       this.emit('device:message', message);
     }
 
+    // Handle device heartbeat messages (format: rapidreach/heartbeat/{clientId})
+    if (topic.startsWith('rapidreach/heartbeat/')) {
+      const parts = topic.split('/');
+      const clientId = parts[2]; // clientId format: NNNNNN-speaker
+      
+      try {
+        const heartbeat = JSON.parse(payload.toString());
+        const deviceId = heartbeat.deviceId || clientId;
+        
+        // Update device as online when we receive heartbeat
+        this.updateDeviceStatus(deviceId, 'online', {
+          clientId,
+          type: clientId.endsWith('-speaker') ? 'speaker' : 'unknown',
+          firmwareVersion: heartbeat.version,
+          uptime: heartbeat.uptime,
+          ipAddress: heartbeat.ip,
+        });
+      } catch (error) {
+        logger.error(`Failed to parse heartbeat from ${clientId}:`, error);
+      }
+    }
+    
     // Handle device status messages
     if (topic.endsWith('/status')) {
       const deviceId = topic.split('/')[0];
@@ -117,24 +143,48 @@ export class DeviceMqttClient extends EventEmitter {
     }
   }
 
-  private updateDeviceStatus(deviceId: string, status: 'online' | 'offline'): void {
+  private updateDeviceStatus(
+    deviceId: string, 
+    status: 'online' | 'offline',
+    metadata?: {
+      clientId?: string;
+      type?: 'speaker' | 'sensor' | 'unknown';
+      firmwareVersion?: string;
+      uptime?: number;
+      ipAddress?: string;
+    }
+  ): void {
     let device = this.devices.get(deviceId);
     
     if (!device) {
       device = {
         id: deviceId,
-        type: 'speaker', // Default type, should be determined from device
+        type: metadata?.type || 'speaker',
         status,
         lastSeen: new Date(),
+        metadata: metadata ? {
+          clientId: metadata.clientId,
+          firmwareVersion: metadata.firmwareVersion,
+          uptime: metadata.uptime,
+          ipAddress: metadata.ipAddress,
+        } : undefined,
       };
       this.devices.set(deviceId, device);
     } else {
       device.status = status;
       device.lastSeen = new Date();
+      
+      // Update metadata if provided
+      if (metadata) {
+        device.metadata = {
+          ...device.metadata,
+          ...metadata,
+        };
+      }
     }
 
     this.emit(`device:${status}`, deviceId);
-    logger.info(`Device ${deviceId} is ${status}`);
+    logger.info(`Device ${deviceId} is ${status}`, metadata || {});
   }
 
   public async sendCommand(deviceId: string, command: string, timeout: number = 5000): Promise<string> {
@@ -181,7 +231,41 @@ export class DeviceMqttClient extends EventEmitter {
     return this.devices.get(deviceId);
   }
 
+  private startDeviceTimeoutCheck(): void {
+    // Check for offline devices every 10 seconds
+    this.deviceTimeoutInterval = setInterval(() => {
+      const now = Date.now();
+      
+      this.devices.forEach((device, deviceId) => {
+        if (device.status === 'online') {
+          const lastSeenMs = device.lastSeen.getTime();
+          
+          if (now - lastSeenMs > this.DEVICE_TIMEOUT_MS) {
+            this.updateDeviceStatus(deviceId, 'offline');
+            logger.info(`Device ${deviceId} marked offline due to timeout`);
+          }
+        }
+      });
+    }, 10000);
+  }
+
+  public getConnectedDevicesCount(): number {
+    let count = 0;
+    this.devices.forEach(device => {
+      if (device.status === 'online') {
+        count++;
+      }
+    });
+    return count;
+  }
+
   public async disconnect(): Promise<void> {
+    // Clear the timeout check interval
+    if (this.deviceTimeoutInterval) {
+      clearInterval(this.deviceTimeoutInterval);
+      this.deviceTimeoutInterval = null;
+    }
+
     return new Promise((resolve) => {
       this.client.end(false, {}, () => {
         logger.info('MQTT client disconnected');

@@ -1,6 +1,6 @@
 export interface Device {
   id: string;
-  type: 'speaker' | 'sensor';
+  type: 'speaker' | 'sensor' | 'unknown';
   status: 'online' | 'offline' | 'unknown';
   lastSeen: Date;
   metadata?: Record<string, any>;

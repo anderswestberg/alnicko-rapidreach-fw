@@ -66,6 +66,20 @@ services:
       - emqx
       - log-server
 
+  web-app:
+    build: ./web-app
+    container_name: rapidreach-web-app
+    ports:
+      - "3003:80"
+    environment:
+      - VITE_API_URL=http://localhost:3002/api
+      - VITE_API_KEY=your-secure-api-key-here
+    restart: unless-stopped
+    networks:
+      - rapidreach-net
+    depends_on:
+      - device-server
+
 volumes:
   emqx-data:
   emqx-log:
