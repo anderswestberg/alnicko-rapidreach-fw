@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, Grid, Typography, Box } from '@mui/material';
+import { Card, CardContent, CardHeader, Grid, Typography, Box, Alert } from '@mui/material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 import DevicesIcon from '@mui/icons-material/Devices';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
+import BusinessIcon from '@mui/icons-material/Business';
 import { getDeviceStats } from './dataProvider';
 
 interface DeviceStats {
@@ -15,11 +16,11 @@ interface DeviceStats {
 }
 
 const COLORS = {
-  connected: '#4caf50',
-  offline: '#f44336',
-  speaker: '#2196f3',
-  sensor: '#ff9800',
-  unknown: '#9e9e9e',
+  connected: '#4caf50', // Keep green for connected
+  offline: '#d32f2f',   // RapidReach red for offline
+  speaker: '#d32f2f',   // RapidReach red for primary device type
+  sensor: '#ff9800',    // Orange for sensors
+  unknown: '#9e9e9e',   // Grey for unknown
 };
 
 export const Dashboard = () => {
@@ -87,6 +88,19 @@ export const Dashboard = () => {
         Device Dashboard
       </Typography>
       
+      <Alert 
+        severity="info" 
+        icon={<BusinessIcon />}
+        sx={{ mb: 3 }}
+      >
+        <Typography variant="body2">
+          <strong>RapidReach Admin</strong> - Powered by React-Admin Enterprise Edition
+        </Typography>
+        <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+          Using Enterprise Admin, Layout, and Navigation components with advanced theming (light/dark mode support)
+        </Typography>
+      </Alert>
+      
       <Grid container spacing={3}>
         {/* Total Devices */}
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -101,7 +115,7 @@ export const Dashboard = () => {
                     {stats.total}
                   </Typography>
                 </Box>
-                <DevicesIcon sx={{ fontSize: 48, color: '#2196f3' }} />
+                <DevicesIcon sx={{ fontSize: 48, color: '#d32f2f' }} />
               </Box>
             </CardContent>
           </Card>

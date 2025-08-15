@@ -4,6 +4,7 @@ import config from './config/index.js';
 import logger from './utils/logger.js';
 import { DeviceMqttClient } from './services/mqtt-client.js';
 import { createDeviceRoutes } from './routes/devices.js';
+import { createDataProviderRoutes } from './routes/dataprovider.js';
 import { authMiddleware } from './middleware/auth.js';
 import { errorHandler } from './middleware/error.js';
 
@@ -38,6 +39,7 @@ async function startServer() {
 
   // API routes (with auth)
   app.use('/api', authMiddleware, createDeviceRoutes(mqttClient));
+  app.use('/api', authMiddleware, createDataProviderRoutes(mqttClient));
 
   // Error handling
   app.use(errorHandler);
