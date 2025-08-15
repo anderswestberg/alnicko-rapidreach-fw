@@ -1,0 +1,20 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/app/logs/.491ba4b41084c41ef1ae361adc0f721d61cb4f33-audit.json",
+    "files": [
+        {
+            "date": 1755165466559,
+            "name": "/app/logs/mqtt-terminal-2025-08-14.log",
+            "hash": "a26f7abc6010158e4d5227dff3048149f7db857747e5e7c03c7ce05674dcca31"
+        },
+        {
+            "date": 1755245246315,
+            "name": "/app/logs/mqtt-terminal-2025-08-15.log",
+            "hash": "e11acadd8cf1608cd53b5716615311ef8a21f848b867490476db1e3a4211277b"
+        }
+    ],
+    "hashType": "sha256"
+}
