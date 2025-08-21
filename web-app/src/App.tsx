@@ -6,7 +6,11 @@ import { Dashboard } from './Dashboard';
 import { DeviceList } from './devices/DeviceList';
 import { DeviceShow } from './devices/DeviceShow';
 import DevicesIcon from '@mui/icons-material/Devices';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import { createTheme } from '@mui/material/styles';
+import { LogsList } from './logs/LogsList';
+import { AudioAlerts } from './audio/AudioAlerts';
 // Navigation components temporarily removed due to compatibility issues
 // import { MultiLevelMenu, MenuItemCategory } from '@react-admin/ra-navigation';
 
@@ -75,6 +79,18 @@ function App() {
         show={DeviceShow}
         icon={DevicesIcon}
         recordRepresentation="id"
+      />
+      <Resource 
+        name="logs" 
+        list={LogsList}
+        icon={ListAltIcon}
+        recordRepresentation="message"
+      />
+      <Resource 
+        name="audio" 
+        list={AudioAlerts}
+        icon={VolumeUpIcon}
+        options={{ label: 'Audio Alerts' }}
       />
     </Admin>
   );

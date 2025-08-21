@@ -1,0 +1,57 @@
+menuconfig RPR_MQTT_LOG_CLIENT
+    bool "Enable MQTT Log Client"
+    depends on RPR_NETWORKING
+    default n
+    help
+      Enable on-device MQTT log client with batching and filesystem FIFO buffering.
+
+if RPR_MQTT_LOG_CLIENT
+
+config RPR_MQTT_LOG_TOPIC_PREFIX
+    string "MQTT logs topic prefix"
+    default "logs"
+
+config RPR_MQTT_LOG_BATCH_MAX
+    int "Max log items per batch"
+    default 200
+    range 1 1000
+
+config RPR_MQTT_LOG_BATCH_BYTES
+    int "Max JSON batch size (bytes)"
+    default 4096
+    range 512 16384
+
+config RPR_MQTT_LOG_FLUSH_INTERVAL_MS
+    int "Flush interval (ms)"
+    default 500
+    range 50 5000
+
+config RPR_MQTT_LOG_RAM_ENTRIES
+    int "RAM buffer entries"
+    default 64
+    range 4 512
+
+config RPR_MQTT_LOG_FS_DIR
+    string "FS directory"
+    default "/logs"
+
+config RPR_MQTT_LOG_FS_FILE_BYTES
+    int "FS chunk file size (bytes)"
+    default 4096
+    range 512 16384
+
+config RPR_MQTT_LOG_FS_MAX_FILES
+    int "FS max files"
+    default 64
+    range 4 1024
+
+config RPR_MQTT_LOG_FS_MAX_BYTES
+    int "FS max total bytes"
+    default 262144
+    range 4096 8388608
+
+endif # RPR_MQTT_LOG_CLIENT
+
+
+
+

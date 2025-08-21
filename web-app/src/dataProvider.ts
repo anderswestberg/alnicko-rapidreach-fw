@@ -1,8 +1,8 @@
 import type { DataProvider } from 'react-admin';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
-const API_KEY = import.meta.env.VITE_API_KEY || 'your-secure-api-key-here';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key';
 
 const apiClient = axios.create({
   baseURL: API_URL,

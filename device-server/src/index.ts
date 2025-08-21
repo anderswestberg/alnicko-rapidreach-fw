@@ -5,8 +5,10 @@ import logger from './utils/logger.js';
 import { DeviceMqttClient } from './services/mqtt-client.js';
 import { createDeviceRoutes } from './routes/devices.js';
 import { createDataProviderRoutes } from './routes/dataprovider.js';
+import { createAudioRoutes } from './routes/audio.js';
 import { authMiddleware } from './middleware/auth.js';
 import { errorHandler } from './middleware/error.js';
+import { connectMongo, disconnectMongo } from './db/mongo.js';
 
 async function startServer() {
   const app = express();
@@ -29,17 +31,31 @@ async function startServer() {
   // Initialize MQTT client
   const mqttClient = new DeviceMqttClient();
   
-  // Wait for MQTT connection
-  await new Promise<void>((resolve) => {
-    mqttClient.once('connected', () => {
-      logger.info('MQTT client ready');
-      resolve();
-    });
-  });
+  // Initialize MongoDB with timeout
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+  const mongoDb = process.env.MONGODB_DB || 'rapidreach';
+  
+  logger.info(`Connecting to MongoDB at ${mongoUri}...`);
+  try {
+    await Promise.race([
+      connectMongo(mongoUri, mongoDb),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('MongoDB connection timeout')), 5000)
+      )
+    ]);
+    logger.info('MongoDB connected successfully');
+  } catch (error) {
+    logger.error('MongoDB connection failed:', error);
+    logger.warn('Starting server without MongoDB - some features may not work');
+  }
+
+  // Skip waiting for MQTT - it connects asynchronously
+  logger.info('MQTT client initialized (connecting in background)');
 
   // API routes (with auth)
   app.use('/api', authMiddleware, createDeviceRoutes(mqttClient));
   app.use('/api', authMiddleware, createDataProviderRoutes(mqttClient));
+  app.use('/api', authMiddleware, createAudioRoutes(mqttClient));
 
   // Error handling
   app.use(errorHandler);
@@ -59,6 +75,7 @@ async function startServer() {
     });
 
     await mqttClient.disconnect();
+    await disconnectMongo();
     process.exit(0);
   });
 
@@ -70,6 +87,7 @@ async function startServer() {
     });
 
     await mqttClient.disconnect();
+    await disconnectMongo();
     process.exit(0);
   });
 }

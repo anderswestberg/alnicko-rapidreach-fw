@@ -38,6 +38,8 @@ services:
     environment:
       - PORT=3000
       - LOG_DIR=/app/logs
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB=rapidreach
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
@@ -59,6 +61,8 @@ services:
       - MQTT_PASSWORD=public
       - API_KEY=your-secure-api-key-here
       - LOG_SERVER_URL=http://log-server:3000
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB=rapidreach
     restart: unless-stopped
     networks:
       - rapidreach-net
@@ -80,9 +84,21 @@ services:
     depends_on:
       - device-server
 
+  mongo:
+    image: mongo:6
+    container_name: rapidreach-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+    networks:
+      - rapidreach-net
+
 volumes:
   emqx-data:
   emqx-log:
+  mongo-data:
 
 networks:
   rapidreach-net:

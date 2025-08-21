@@ -18,6 +18,9 @@
 #ifdef CONFIG_RPR_MODULE_MQTT
 #include "../mqtt_module/mqtt_module.h"
 #endif
+#ifdef CONFIG_RPR_MQTT_LOG_CLIENT
+#include "../mqtt_log_client/mqtt_log_client.h"
+#endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -111,6 +114,11 @@ static void network_startup_handler(void)
         LOG_WRN("MQTT connection failed: %d", status);
         /* Auto-reconnect will handle retries */
     }
+#endif
+
+    /* Initialize MQTT log client after MQTT main connects */
+#ifdef CONFIG_RPR_MQTT_LOG_CLIENT
+    (void)mqtt_log_client_init();
 #endif
 }
 

@@ -44,6 +44,7 @@ rsource "wifi/Kconfig.wifi"
 rsource "mqtt_module/Kconfig.mqtt"
 rsource "http_module/Kconfig.http"
 rsource "http_log_client/Kconfig"
+rsource "mqtt_log_client/Kconfig.mqtt_log"
 
 
 endif # RPR_NETWORKING

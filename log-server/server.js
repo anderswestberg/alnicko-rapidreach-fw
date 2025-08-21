@@ -6,6 +6,7 @@ import DailyRotateFile from 'winston-daily-rotate-file';
 import compression from 'compression';
 import helmet from 'helmet';
 import { promises as fs } from 'fs';
+import { MongoClient } from 'mongodb';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -85,8 +86,23 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Initialize Mongo (optional)
+const MONGO_URI = process.env.MONGODB_URI;
+const MONGO_DB = process.env.MONGODB_DB || 'rapidreach';
+let mongoClient = null;
+let mongoDb = null;
+
+async function ensureMongo() {
+  if (!MONGO_URI) return null;
+  if (mongoDb) return mongoDb;
+  mongoClient = new MongoClient(MONGO_URI);
+  await mongoClient.connect();
+  mongoDb = mongoClient.db(MONGO_DB);
+  return mongoDb;
+}
+
 // Log batch endpoint
-app.post('/logs', (req, res) => {
+app.post('/logs', async (req, res) => {
   const { source, logs } = req.body;
   
   if (!source) {
@@ -98,6 +114,8 @@ app.post('/logs', (req, res) => {
   }
   
   const logger = getLogger(source);
+  const db = await ensureMongo();
+  const collection = db ? db.collection('logs') : null;
   let processedCount = 0;
   
   for (const log of logs) {
@@ -111,6 +129,15 @@ app.post('/logs', (req, res) => {
         timestamp: timestamp || new Date().toISOString(),
         ...meta
       });
+      if (collection) {
+        await collection.insertOne({
+          source,
+          level: level.toLowerCase(),
+          message,
+          timestamp: timestamp ? new Date(timestamp) : new Date(),
+          ...meta
+        });
+      }
       
       processedCount++;
     } catch (error) {
@@ -126,7 +153,7 @@ app.post('/logs', (req, res) => {
 });
 
 // Single log endpoint
-app.post('/log', (req, res) => {
+app.post('/log', async (req, res) => {
   const { source, level = 'info', message, ...meta } = req.body;
   
   if (!source || !message) {
@@ -134,6 +161,8 @@ app.post('/log', (req, res) => {
   }
   
   const logger = getLogger(source);
+  const db = await ensureMongo();
+  const collection = db ? db.collection('logs') : null;
   
   logger.log({
     level: level.toLowerCase(),
@@ -141,6 +170,15 @@ app.post('/log', (req, res) => {
     timestamp: new Date().toISOString(),
     ...meta
   });
+  if (collection) {
+    await collection.insertOne({
+      source,
+      level: level.toLowerCase(),
+      message,
+      timestamp: new Date(),
+      ...meta
+    });
+  }
   
   res.json({ success: true });
 });
