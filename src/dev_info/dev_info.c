@@ -15,6 +15,7 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/hwinfo.h>
+#include <stdio.h>
 
 #include "app_version.h"
 #include "dev_info.h"

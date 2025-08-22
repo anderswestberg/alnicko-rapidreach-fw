@@ -56,17 +56,16 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
             parsed_msg.metadata.volume);
     
     /* Handle based on priority and current playback state */
-    if (parsed_msg.metadata.interrupt_current || !audio_player_is_playing()) {
+    if (parsed_msg.metadata.interrupt_current) {
         /* Stop current playback if needed */
-        if (audio_player_is_playing() && parsed_msg.metadata.interrupt_current) {
-            LOG_INF("Interrupting current playback for priority %d message",
-                    parsed_msg.metadata.priority);
-            audio_player_stop();
-            k_msleep(100); /* Allow stop to complete */
-        }
-        
-        /* Handle file save or direct playback */
-        if (parsed_msg.metadata.save_to_file && strlen(parsed_msg.metadata.filename) > 0) {
+        LOG_INF("Interrupting current playback for priority %d message",
+                parsed_msg.metadata.priority);
+        audio_player_stop();
+        k_msleep(100); /* Allow stop to complete */
+    }
+    
+    /* Handle file save or direct playback */
+    if (parsed_msg.metadata.save_to_file && strlen(parsed_msg.metadata.filename) > 0) {
             /* Save Opus data to specified file */
             char filepath[128];
             snprintf(filepath, sizeof(filepath), "/lfs/%s", parsed_msg.metadata.filename);
@@ -87,10 +86,8 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                     break;
                 }
                 
-                /* Wait for playback to complete */
-                while (audio_player_is_playing()) {
-                    k_msleep(100);
-                }
+                /* Wait for playback to complete - TODO: implement proper check */
+                k_msleep(3000); /* Assume 3 seconds playback time */
                 
                 /* Break if infinite loop and stop requested */
                 if (parsed_msg.metadata.play_count == 0) {
@@ -122,10 +119,8 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                     break;
                 }
                 
-                /* Wait for playback to complete */
-                while (audio_player_is_playing()) {
-                    k_msleep(100);
-                }
+                /* Wait for playback to complete - TODO: implement proper check */
+                k_msleep(3000); /* Assume 3 seconds playback time */
                 
                 /* Break if infinite loop and stop requested */
                 if (parsed_msg.metadata.play_count == 0) {
@@ -137,30 +132,15 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
             /* Delete temporary file */
             file_manager_delete(TEMP_AUDIO_FILE_PATH);
         }
-    } else {
-        /* Queue the message for later playback based on priority */
-        LOG_INF("Audio player busy, queueing message with priority %d", 
-                parsed_msg.metadata.priority);
-        
-        /* TODO: Implement priority queue for deferred playback */
-        struct audio_msg_queue_item item = {
-            .metadata = parsed_msg.metadata,
-            .opus_data = NULL,  /* Would need to allocate and copy */
-            .opus_data_len = parsed_msg.opus_data_len
-        };
-        
-        ret = k_msgq_put(&audio_msg_queue, &item, K_NO_WAIT);
-        if (ret != 0) {
-            LOG_WRN("Audio message queue full, dropping message");
-        }
-    }
+
 }
 
 const char *mqtt_get_audio_alert_topic(void)
 {
     /* Build topic once using device ID */
     if (audio_alert_topic[0] == '\0') {
-        const char *device_id = dev_info_get_device_id();
+        size_t len;
+        const char *device_id = dev_info_get_device_id_str(&len);
         if (device_id) {
             snprintf(audio_alert_topic, sizeof(audio_alert_topic),
                      "%s%s", AUDIO_ALERT_TOPIC_PREFIX, device_id);

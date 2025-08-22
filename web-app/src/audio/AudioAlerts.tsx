@@ -173,8 +173,7 @@ export const AudioAlerts = () => {
                 >
                   {devices.map((device) => (
                     <MenuItem key={device.id} value={device.id}>
-                      {device.id} - {device.type}
-                      {device.metadata?.clientId && ` (${device.metadata.clientId})`}
+                      {device.clientId || device.id} - {device.type}
                     </MenuItem>
                   ))}
                 </Select>

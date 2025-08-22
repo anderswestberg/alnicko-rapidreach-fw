@@ -56,10 +56,16 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
         .skip(start)
         .limit(limit);
       const items = await cursor.toArray();
+      
+      // Transform _id to id for React-Admin
+      const transformedItems = items.map(item => ({
+        ...item,
+        id: item._id || item.id,
+      }));
 
       res.set('Content-Range', `${resource} ${start}-${end}/${total}`);
       res.set('X-Total-Count', total.toString());
-      res.json(items);
+      res.json(transformedItems);
     } catch (error) {
       logger.error('Error in getList:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -78,12 +84,17 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
       }
 
       const col = getCollection(resource);
-      col.findOne({ id }).then((doc) => {
+      col.findOne({ $or: [{ id }, { _id: id }] }).then((doc) => {
         if (!doc) {
           res.status(404).json({ error: 'Record not found' });
           return;
         }
-        res.json(doc);
+        // Transform _id to id for React-Admin
+        const transformed = {
+          ...doc,
+          id: doc._id || doc.id,
+        };
+        res.json(transformed);
       }).catch((err) => {
         logger.error('Error in getOne:', err);
         res.status(500).json({ error: 'Internal server error' });

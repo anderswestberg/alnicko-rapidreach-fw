@@ -1,5 +1,5 @@
 {
-    "zephyr-ide.use-zephyr-ide-json": false,
+    "zephyr-ide.use-zephyr-ide-json": true,
     "zephyr-ide.projects": null,
     "devicetree.zephyr": "${workspaceFolder}/external/zephyr",
     "kconfig.zephyr.base": "${workspaceFolder}/external/zephyr",
@@ -59,9 +59,22 @@
     "editor.formatOnSave": false,
     "editor.formatOnSaveMode": "file",
     "terminal.integrated.defaultProfile.linux": "Zephyr IDE Terminal",
+    "terminal.integrated.profiles.linux": {
+        "Zephyr IDE Terminal": {
+            "path": "/bin/bash",
+            "args": ["-c", "source /home/rapidreach/zephyrproject/.venv/bin/activate && exec bash"],
+            "env": {
+                "ZEPHYR_BASE": "/home/rapidreach/work/alnicko-rapidreach-fw/external/zephyr"
+            }
+        }
+    },
     "C_Cpp.default.compileCommands": "${workspaceFolder}/.vscode/compile_commands.json",
     "C_Cpp.default.configurationProvider": "",
     "C_Cpp.intelliSenseEngine": "default",
     "cmake.configureOnOpen": false,
+    "zephyr-ide.west-path": "/home/rapidreach/zephyrproject/.venv/bin/west",
+    "python.defaultInterpreterPath": "/home/rapidreach/zephyrproject/.venv/bin/python",
+    "zephyr-ide.zephyr-base": "/home/rapidreach/work/alnicko-rapidreach-fw/external/zephyr",
+    "zephyr-ide.workspace": "/home/rapidreach/work/alnicko-rapidreach-fw"
 
 }

@@ -1,0 +1,19 @@
+{
+  "name": "RapidReach Control Center",
+  "short_name": "RapidReach",
+  "description": "Monitor and control your RapidReach speaker devices",
+  "theme_color": "#1976d2",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/rapidreach-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

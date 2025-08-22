@@ -17,6 +17,7 @@
 
 #ifdef CONFIG_RPR_MODULE_MQTT
 #include "../mqtt_module/mqtt_module.h"
+#include "../mqtt_module/mqtt_audio_handler.h"
 #endif
 #ifdef CONFIG_RPR_MQTT_LOG_CLIENT
 #include "../mqtt_log_client/mqtt_log_client.h"
@@ -110,6 +111,14 @@ static void network_startup_handler(void)
         
         /* Optionally start heartbeat */
         mqtt_start_heartbeat();
+        
+        /* Initialize audio handler - subscribes to audio alert topics */
+        int ret = mqtt_audio_handler_init();
+        if (ret == 0) {
+            LOG_INF("MQTT audio handler initialized successfully");
+        } else {
+            LOG_ERR("Failed to initialize MQTT audio handler: %d", ret);
+        }
     } else {
         LOG_WRN("MQTT connection failed: %d", status);
         /* Auto-reconnect will handle retries */

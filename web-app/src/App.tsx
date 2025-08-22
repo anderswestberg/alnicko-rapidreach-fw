@@ -58,7 +58,7 @@ function App() {
       dashboard={Dashboard}
       theme={theme}
       //layout={CustomLayout}
-      title="RapidReach Admin"
+      title="RapidReach Control Center"
       // Enterprise Edition features
       lightTheme={theme}
       darkTheme={createTheme({

@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/app/logs/.732f193a72155daa976363e1f67f5c9b4065176d-audit.json",
+    "files": [
+        {
+            "date": 1755789885003,
+            "name": "/app/logs/313938-speaker-2025-08-21.log",
+            "hash": "f5996b666a6343c6492d8b906136838411ae476a589ab57f4a8de29ddd00443e"
+        }
+    ],
+    "hashType": "sha256"
+}

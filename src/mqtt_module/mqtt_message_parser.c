@@ -6,6 +6,7 @@
 #include "mqtt_message_parser.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/data/json.h>
 

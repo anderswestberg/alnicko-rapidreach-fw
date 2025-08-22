@@ -104,6 +104,10 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       // Check if device exists and is connected
       const device = mqttClient.getDevice(deviceId);
       if (!device) {
+        logger.warn(`Device not found in MQTT client: ${deviceId}`);
+        // List all registered devices for debugging
+        const allDevices = mqttClient.getDevices();
+        logger.debug(`Registered devices: ${allDevices.map(d => d.id).join(', ')}`);
         return res.status(404).json({
           success: false,
           error: 'Device not found',
@@ -146,6 +150,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
         if (stderr && !stderr.includes('Qavg:')) { // ffmpeg writes progress to stderr
           logger.warn('ffmpeg stderr:', stderr);
         }
+        logger.debug('ffmpeg conversion completed successfully');
       } catch (error) {
         logger.error('ffmpeg conversion failed:', error);
         return res.status(500).json({
