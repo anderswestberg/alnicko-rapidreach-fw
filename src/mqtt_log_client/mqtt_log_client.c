@@ -9,6 +9,8 @@
 
 #include "../mqtt_module/mqtt_module.h"
 #include "../dev_info/dev_info.h"
+#include "../rtc/rtc.h"
+#include <time.h>
 
 LOG_MODULE_REGISTER(mqtt_log, LOG_LEVEL_INF);
 
@@ -121,11 +123,28 @@ static size_t append_json_item(char *buf, size_t buf_size, const struct mqtt_log
 	}
 	*dst = '\0';
 
+	/* Try to get actual time if RTC is available and timestamp looks like uptime */
+	int64_t timestamp_to_send = e->timestamp;
+	if (e->timestamp > 0 && e->timestamp < 1000000000) {
+		/* This looks like uptime in ms, try to get real time */
+		struct rtc_time current_time;
+		if (get_date_time(&current_time) == 0) {
+			/* RTC is available, convert to Unix timestamp */
+			time_t current_unix = mktime((struct tm *)&current_time);
+			if (current_unix != (time_t)-1) {
+				/* Convert to milliseconds and subtract uptime to get boot time */
+				int64_t current_ms = (int64_t)current_unix * 1000;
+				int64_t boot_time_ms = current_ms - k_uptime_get();
+				timestamp_to_send = boot_time_ms + e->timestamp;
+			}
+		}
+	}
+
 	size_t used = 0;
 	used += snprintf(buf + used, buf_size - used,
 				   "%s{\"timestamp\":%lld,\"level\":\"%s\",\"module\":\"%s\",\"message\":\"%s\"}",
 				   first ? "" : ",",
-				   (long long)e->timestamp, e->level, e->module, esc);
+				   (long long)timestamp_to_send, e->level, e->module, esc);
 	return used;
 }
 

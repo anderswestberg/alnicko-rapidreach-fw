@@ -60,6 +60,8 @@
 #include "dfu_manager.h"
 #endif
 
+#include "rtc.h"
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(domain_logic, CONFIG_EXAMPLES_DOMAIN_LOGIC_LOG_LEVEL);
 
@@ -305,21 +307,31 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
 #endif
 
 #ifdef CONFIG_RPR_MODULE_MQTT
-        /* Initialize MQTT module now that we have network */
-        int ret = mqtt_init();
-        if (ret == 0) {
-            LOG_INF("MQTT module initialized");
-            /* Connect to MQTT broker */
-            mqtt_status_t status = mqtt_module_connect();
-            if (status == MQTT_SUCCESS) {
-                LOG_INF("MQTT connection initiated");
-                /* Start heartbeat */
-                mqtt_start_heartbeat();
+        /* Check if RTC is ready before initializing MQTT */
+        struct rtc_time current_time;
+        int rtc_ret = get_date_time(&current_time);
+        if (rtc_ret == 0) {
+            LOG_INF("RTC is ready, current year: %d", current_time.tm_year);
+            
+            /* Initialize MQTT module now that we have network and RTC */
+            int ret = mqtt_init();
+            if (ret == 0) {
+                LOG_INF("MQTT module initialized");
+                /* Connect to MQTT broker */
+                mqtt_status_t status = mqtt_module_connect();
+                if (status == MQTT_SUCCESS) {
+                    LOG_INF("MQTT connection initiated");
+                    /* Start heartbeat */
+                    mqtt_start_heartbeat();
+                } else {
+                    LOG_ERR("Failed to connect to MQTT broker: %d", status);
+                }
             } else {
-                LOG_ERR("Failed to connect to MQTT broker: %d", status);
+                LOG_ERR("Failed to initialize MQTT module: %d", ret);
             }
         } else {
-            LOG_ERR("Failed to initialize MQTT module: %d", ret);
+            LOG_WRN("RTC not ready yet (ret=%d), delaying MQTT initialization", rtc_ret);
+            /* TODO: Could retry later or use a work queue */
         }
 #endif
         

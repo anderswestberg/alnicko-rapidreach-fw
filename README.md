@@ -448,6 +448,36 @@ All example-related configuration options begin with the prefix:
 CONFIG_EXAMPLES_*
 ```
 
+## Troubleshooting
+
+### Filesystem Not Accessible
+
+If the filesystem commands (`fs ls`, `fs read`, etc.) are not working, the LittleFS filesystem may not be mounted. To fix this:
+
+1. Mount the filesystem manually:
+   ```bash
+   # Via MQTT terminal
+   mqtt-terminal -d "313938-shell" -c "fs mount littlefs /lfs" -q
+   
+   # Or via serial console
+   fs mount littlefs /lfs
+   ```
+
+2. Verify the mount was successful:
+   ```bash
+   fs ls /lfs
+   ```
+
+3. Check filesystem status:
+   ```bash
+   fs statvfs /lfs
+   ```
+
+The filesystem should automatically mount on boot, but if it crashes or fails to mount, the above commands will restore access. All files are stored under `/lfs/` including:
+- `/lfs/audio/` - Audio files (Opus format)
+- `/lfs/wifi/` - WiFi configuration
+- `/lfs/http_logs.bin` - HTTP log storage
+
 ## Documentation
 
 - [Zephyr Documentation](https://docs.zephyrproject.org/)
