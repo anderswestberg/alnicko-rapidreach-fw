@@ -63,9 +63,11 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
         id: item._id || item.id,
       }));
 
-      res.set('Content-Range', `${resource} ${start}-${end}/${total}`);
-      res.set('X-Total-Count', total.toString());
-      res.json(transformedItems);
+      // Return data in React-Admin expected format
+      res.json({
+        data: transformedItems,
+        total: total
+      });
     } catch (error) {
       logger.error('Error in getList:', error);
       res.status(500).json({ error: 'Internal server error' });

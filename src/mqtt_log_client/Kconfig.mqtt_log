@@ -52,6 +52,23 @@ config RPR_MQTT_LOG_FS_MAX_BYTES
 
 endif # RPR_MQTT_LOG_CLIENT
 
+menuconfig LOG_BACKEND_MQTT
+    bool "Enable MQTT log backend"
+    depends on RPR_MQTT_LOG_CLIENT && LOG
+    default y if RPR_MQTT_LOG_CLIENT
+    help
+      Enable Zephyr log backend that forwards all logs to MQTT.
+
+if LOG_BACKEND_MQTT
+
+config LOG_BACKEND_MQTT_OUTPUT_DEFAULT
+    int "Default log format"
+    default 0
+    help
+      Default log format for MQTT backend.
+
+endif # LOG_BACKEND_MQTT
+
 
 
 

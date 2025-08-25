@@ -9,8 +9,13 @@ import { createAudioRoutes } from './routes/audio.js';
 import { authMiddleware } from './middleware/auth.js';
 import { errorHandler } from './middleware/error.js';
 import { connectMongo, disconnectMongo } from './db/mongo.js';
+// Coordination now uses the existing DeviceMqttClient
 
 async function startServer() {
+  // Coordination for mixed environments (container + host):
+  // If a recent marker is present, probe for a live instance of the same service before proceeding.
+  // MQTT-based coordination using the existing client; if broker is unavailable, continue startup
+
   const app = express();
   
   // Middleware
@@ -30,6 +35,8 @@ async function startServer() {
 
   // Initialize MQTT client
   const mqttClient = new DeviceMqttClient();
+  // Coordinate single instance via the shared client (WAIT before binding HTTP port)
+  await mqttClient.coordinateSingleInstance('device-server', 5000);
   
   // Initialize MongoDB with timeout
   const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
@@ -69,26 +76,50 @@ async function startServer() {
   // Graceful shutdown
   process.on('SIGTERM', async () => {
     logger.info('SIGTERM received, shutting down gracefully');
-    
-    server.close(() => {
-      logger.info('HTTP server closed');
-    });
+    const force = setTimeout(() => {
+      logger.warn('Force exiting after timeout');
+      process.exit(0);
+    }, 1500);
 
-    await mqttClient.disconnect();
-    await disconnectMongo();
-    process.exit(0);
+    try {
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          logger.info('HTTP server closed');
+          resolve();
+        });
+      });
+      await mqttClient.disconnect();
+      await disconnectMongo();
+    } catch (e) {
+      logger.warn('Error during shutdown cleanup', e);
+    } finally {
+      clearTimeout(force);
+      process.exit(0);
+    }
   });
 
   process.on('SIGINT', async () => {
     logger.info('SIGINT received, shutting down gracefully');
-    
-    server.close(() => {
-      logger.info('HTTP server closed');
-    });
+    const force = setTimeout(() => {
+      logger.warn('Force exiting after timeout');
+      process.exit(0);
+    }, 1500);
 
-    await mqttClient.disconnect();
-    await disconnectMongo();
-    process.exit(0);
+    try {
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          logger.info('HTTP server closed');
+          resolve();
+        });
+      });
+      await mqttClient.disconnect();
+      await disconnectMongo();
+    } catch (e) {
+      logger.warn('Error during shutdown cleanup', e);
+    } finally {
+      clearTimeout(force);
+      process.exit(0);
+    }
   });
 }
 

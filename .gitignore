@@ -73,3 +73,7 @@ mqtt/data/mosquitto.db
 mqtt/config/mosquitto.conf
 
 .env
+
+# PID files
+.device-server.pid
+device-server/.device-server.pid

@@ -35,19 +35,29 @@ export const dataProvider: DataProvider = {
 
     const response = await apiClient.get(`/dataprovider/${resource}?${query.toString()}`);
     
-    // Extract total from Content-Range header or X-Total-Count
-    const contentRange = response.headers['content-range'];
-    const xTotalCount = response.headers['x-total-count'];
-    const total = contentRange 
-      ? parseInt(contentRange.split('/')[1]) 
-      : xTotalCount 
-      ? parseInt(xTotalCount)
-      : response.data.length;
+    // The server should return { data: [...], total: number }
+    // If it returns an array directly, wrap it
+    const result = Array.isArray(response.data) 
+      ? {
+          data: response.data,
+          // Try to get total from headers as fallback
+          total: response.headers['x-total-count'] 
+            ? parseInt(response.headers['x-total-count'])
+            : response.data.length
+        }
+      : response.data;
+    
+    // Debug logging for pagination
+    console.log('Pagination debug:', {
+      resource,
+      page: params.pagination?.page,
+      perPage: params.pagination?.perPage,
+      responseData: Array.isArray(response.data) ? 'array' : 'object',
+      total: result.total,
+      dataLength: result.data?.length
+    });
 
-    return {
-      data: response.data,
-      total,
-    };
+    return result;
   },
 
   getOne: async (resource: string, params: any) => {
@@ -79,18 +89,18 @@ export const dataProvider: DataProvider = {
 
     const response = await apiClient.get(`/dataprovider/${resource}?${query.toString()}`);
     
-    const contentRange = response.headers['content-range'];
-    const xTotalCount = response.headers['x-total-count'];
-    const total = contentRange 
-      ? parseInt(contentRange.split('/')[1]) 
-      : xTotalCount 
-      ? parseInt(xTotalCount)
-      : response.data.length;
+    // The server should return { data: [...], total: number }
+    // If it returns an array directly, wrap it
+    const result = Array.isArray(response.data) 
+      ? {
+          data: response.data,
+          total: response.headers['x-total-count'] 
+            ? parseInt(response.headers['x-total-count'])
+            : response.data.length
+        }
+      : response.data;
 
-    return {
-      data: response.data,
-      total,
-    };
+    return result;
   },
 
   create: async (resource: string, params: any) => {

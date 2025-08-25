@@ -30,6 +30,14 @@ export class DeviceMqttClient extends EventEmitter {
   private readonly LOG_BATCH_DELAY_MS = 500; // wait for more logs for 500ms
   private readonly LOG_BATCH_MAX = 200; // flush when buffer reaches this size
 
+  // Coordination
+  private coordName?: string;
+  private coordStartedAt?: number;
+  private coordWaitMs: number = 5000;
+  private coordInitialized: boolean = false;
+  private coordExitRequested: boolean = false;
+  private standbyMode: boolean = false;
+
   constructor() {
     super();
     
@@ -62,21 +70,27 @@ export class DeviceMqttClient extends EventEmitter {
         'rapidreach/logs/+',       // Alternate logs prefix
       ];
       
-      patterns.forEach(pattern => {
-        this.client.subscribe(pattern, { qos: 1 }, (err, granted) => {
-          if (err) {
-            logger.error(`Failed to subscribe to ${pattern}:`, err);
-          } else {
-            logger.info(`Subscribe result for ${pattern}:`, granted);
-            // Check if subscription was actually granted
-            if (granted && granted.length > 0 && granted[0].qos !== 128) {
-              logger.info(`Successfully subscribed to ${pattern} with QoS ${granted[0].qos}`);
+      if (!this.standbyMode) {
+        patterns.forEach(pattern => {
+          this.client.subscribe(pattern, { qos: 1 }, (err, granted) => {
+            if (err) {
+              logger.error(`Failed to subscribe to ${pattern}:`, err);
             } else {
-              logger.warn(`Subscription to ${pattern} was rejected (QoS 128 or empty grant)`);
+              logger.info(`Subscribe result for ${pattern}:`, granted);
+              if (granted && granted.length > 0 && granted[0].qos !== 128) {
+                logger.info(`Successfully subscribed to ${pattern} with QoS ${granted[0].qos}`);
+              } else {
+                logger.warn(`Subscription to ${pattern} was rejected (QoS 128 or empty grant)`);
+              }
             }
-          }
+          });
         });
-      });
+      }
+
+      // Coordination subscriptions/publish
+      if (this.coordName && !this.coordInitialized) {
+        void this.setupCoordination();
+      }
     });
 
     this.client.on('disconnect', () => {
@@ -89,8 +103,140 @@ export class DeviceMqttClient extends EventEmitter {
     });
 
     this.client.on('message', (topic, payload) => {
+      // Coordination handling first
+      if (this.coordName && (topic === `rapidreach/coord/${this.coordName}/current` || topic === `rapidreach/coord/${this.coordName}/announce`)) {
+        try {
+          const data = JSON.parse(payload.toString());
+          if (data && data.name === this.coordName && typeof data.startedAt === 'number' && this.coordStartedAt && data.startedAt > this.coordStartedAt) {
+            logger.warn(`${this.coordName}: newer instance detected (startedAt=${data.startedAt}). Initiating shutdown.`);
+            this.initiateSelfShutdown();
+            return;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (this.standbyMode) {
+        // Ignore non-coordination traffic while in standby
+        return;
+      }
       this.handleMessage(topic, payload);
     });
+  }
+
+  private async setupCoordination(): Promise<void> {
+    if (!this.coordName) return;
+    const name = this.coordName;
+    const startedAt = this.coordStartedAt ?? Date.now();
+    this.coordStartedAt = startedAt;
+    const base = `rapidreach/coord/${name}`;
+    const topicCurrent = `${base}/current`;
+    const topicAnnounce = `${base}/announce`;
+
+    await new Promise<void>((resolve) => {
+      this.client.subscribe([topicCurrent, topicAnnounce], { qos: 0 }, () => resolve());
+    });
+    logger.info(`[coord] Subscribed to ${topicCurrent}, ${topicAnnounce}`);
+
+    // Publish retained leader and announces
+    this.client.publish(topicCurrent, JSON.stringify({ name, startedAt }), { qos: 0, retain: true });
+    logger.info(`[coord] Published retained leader to ${topicCurrent} (startedAt=${startedAt})`);
+    for (let i = 0; i < 5; i += 1) {
+      this.client.publish(topicAnnounce, JSON.stringify({ name, startedAt }), { qos: 0, retain: false });
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    logger.info(`[coord] Sent announces on ${topicAnnounce}`);
+    await new Promise((r) => setTimeout(r, this.coordWaitMs));
+    this.coordInitialized = true;
+  }
+
+  private initiateSelfShutdown(): void {
+    if (this.coordExitRequested) return;
+    this.coordExitRequested = true;
+    if (this.isRunningInContainer()) {
+      // Enter standby: free resources and unsubscribe device topics, keep coordination
+      void this.enterStandby();
+      this.emit('standby');
+      return;
+    }
+    // Stop periodic timers owned by this client
+    if (this.deviceTimeoutInterval) {
+      try { clearInterval(this.deviceTimeoutInterval); } catch {}
+      this.deviceTimeoutInterval = null as any;
+    }
+    // Clear all log flush timers
+    try {
+      this.logFlushTimers.forEach((t) => { try { clearTimeout(t); } catch {} });
+      this.logFlushTimers.clear();
+    } catch {}
+    // Clear all pending command timeouts
+    try {
+      this.pendingCommands.forEach((pc) => { try { clearTimeout(pc.timeout); } catch {} });
+      this.pendingCommands.clear();
+    } catch {}
+    // End MQTT to help free resources quickly
+    try { this.client.end(true); } catch {}
+    // Trigger app-level graceful shutdown (index.ts handles SIGTERM)
+    try { process.kill(process.pid, 'SIGTERM'); } catch {}
+    // If running under a dev watcher (e.g., tsx watch), also signal parent to stop restarting
+    try {
+      if (process.ppid && process.ppid !== 1) {
+        process.kill(process.ppid, 'SIGTERM');
+      }
+    } catch {}
+    // Fallback hard-exit after grace period
+    setTimeout(() => {
+      try { process.exit(0); } catch {}
+    }, 300);
+  }
+
+  private async enterStandby(): Promise<void> {
+    this.standbyMode = true;
+    // Unsubscribe device and log topics
+    const patterns = [
+      'devices/+/tx',
+      'rapidreach/+/shell/out',
+      'rapidreach/heartbeat/+',
+      'logs/+',
+      'rapidreach/logs/+',
+    ];
+    try {
+      await new Promise<void>((resolve) => this.client.unsubscribe(patterns, () => resolve()));
+    } catch {}
+    // Clear timers and pending
+    try {
+      if (this.deviceTimeoutInterval) { clearInterval(this.deviceTimeoutInterval); this.deviceTimeoutInterval = null as any; }
+      this.logFlushTimers.forEach((t) => { try { clearTimeout(t); } catch {} });
+      this.logFlushTimers.clear();
+      this.pendingCommands.forEach((pc) => { try { clearTimeout(pc.timeout); } catch {} });
+      this.pendingCommands.clear();
+    } catch {}
+    logger.info('Entered standby mode (container): resources freed, coordination active');
+  }
+
+  private isRunningInContainer(): boolean {
+    try {
+      // Common Docker hint
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const fs = require('fs');
+      if (fs.existsSync('/.dockerenv')) return true;
+      const cgroup = fs.readFileSync('/proc/1/cgroup', 'utf8');
+      return /docker|kubepods|containerd/i.test(cgroup);
+    } catch {
+      return false;
+    }
+  }
+
+  public async coordinateSingleInstance(name: string, waitMs: number = 5000): Promise<void> {
+    this.coordName = name;
+    this.coordWaitMs = waitMs;
+    this.coordStartedAt = Date.now();
+    if (this.client.connected) {
+      await this.setupCoordination();
+    } else {
+      await new Promise<void>((resolve) => this.once('connected', () => resolve()));
+      await this.setupCoordination();
+    }
   }
 
   private handleMessage(topic: string, payload: Buffer): void {
@@ -125,8 +271,36 @@ export class DeviceMqttClient extends EventEmitter {
       const text = payload.toString();
       let items: any[] = [];
       try {
-        const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) {
+        // Clean control characters from the text before parsing
+        // Replace control characters with their escaped versions or remove them
+        const cleanedText = text.replace(/[\x00-\x1F\x7F]/g, (match) => {
+          // Convert control characters to escaped unicode
+          return '\\u' + ('0000' + match.charCodeAt(0).toString(16)).slice(-4);
+        });
+        const parsed = JSON.parse(cleanedText);
+        
+        // Handle batched logs from device firmware (format: {source: "deviceId", logs: [...]})
+        if (parsed.logs && Array.isArray(parsed.logs)) {
+          logger.info(`Processing batched logs from ${deviceId}:`, { 
+            count: parsed.logs.length,
+            source: parsed.source,
+            firstLog: parsed.logs[0]
+          });
+          items = parsed.logs.map((p: any) => ({
+            deviceId: parsed.source || deviceId,
+            source: parsed.source || deviceId,
+            level: (p.level || 'info').toLowerCase(),
+            message: p.message !== undefined ? p.message : JSON.stringify(p),
+            // Handle timestamp - if it's a number, assume it's ms since boot
+            timestamp: p.timestamp 
+              ? (typeof p.timestamp === 'number' && p.timestamp < 1000000000 
+                 ? new Date(now.getTime() - (Date.now() - p.timestamp))
+                 : new Date(p.timestamp))
+              : now,
+            module: p.module || 'unknown',
+          }));
+        } else if (Array.isArray(parsed)) {
+          // Handle array of logs
           items = parsed.map((p) => ({
             deviceId,
             source: deviceId,
@@ -136,6 +310,12 @@ export class DeviceMqttClient extends EventEmitter {
             ...p,
           }));
         } else {
+          // Handle single log entry
+          logger.warn(`Treating as single log entry from ${deviceId}:`, {
+            hasLogs: 'logs' in parsed,
+            keys: Object.keys(parsed),
+            textPreview: text.substring(0, 100)
+          });
           items = [{
             deviceId,
             source: deviceId,

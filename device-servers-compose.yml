@@ -30,24 +30,6 @@ services:
       timeout: 5s
       retries: 5
 
-  log-server:
-    build: ./log-server
-    container_name: rapidreach-log-server
-    ports:
-      - "3001:3000"  # Map to 3001 to avoid conflicts
-    environment:
-      - PORT=3000
-      - LOG_DIR=/app/logs
-      - MONGODB_URI=mongodb://mongo:27017
-      - MONGODB_DB=rapidreach
-    volumes:
-      - ./logs:/app/logs
-    restart: unless-stopped
-    networks:
-      - rapidreach-net
-    depends_on:
-      - emqx
-
   device-server:
     build: ./device-server
     container_name: rapidreach-device-server
@@ -60,7 +42,6 @@ services:
       - MQTT_USERNAME=admin
       - MQTT_PASSWORD=public
       - API_KEY=your-secure-api-key-here
-      - LOG_SERVER_URL=http://log-server:3000
       - MONGODB_URI=mongodb://mongo:27017
       - MONGODB_DB=rapidreach
     restart: unless-stopped
@@ -68,7 +49,6 @@ services:
       - rapidreach-net
     depends_on:
       - emqx
-      - log-server
 
   web-app:
     build: ./web-app
