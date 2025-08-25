@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { DeviceMqttClient } from '../services/mqtt-client.js';
 import logger from '../utils/logger.js';
 import { getCollection } from '../db/mongo.js';
+import { ObjectId } from 'mongodb';
 
 // React-Admin expects these specific query parameters
 // Currently unused but kept for future validation
@@ -86,7 +87,20 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
       }
 
       const col = getCollection(resource);
-      col.findOne({ $or: [{ id }, { _id: id }] }).then((doc) => {
+      
+      // Try to parse as ObjectId if it looks like one
+      let query: any;
+      try {
+        if (ObjectId.isValid(id) && id.length === 24) {
+          query = { $or: [{ _id: new ObjectId(id) }, { _id: id }, { id }] };
+        } else {
+          query = { $or: [{ id }, { _id: id }, { clientId: id }] };
+        }
+      } catch (e) {
+        query = { $or: [{ id }, { _id: id }, { clientId: id }] };
+      }
+      
+      col.findOne(query).then((doc) => {
         if (!doc) {
           res.status(404).json({ error: 'Record not found' });
           return;

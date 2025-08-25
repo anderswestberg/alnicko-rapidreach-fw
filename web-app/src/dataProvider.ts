@@ -33,31 +33,36 @@ export const dataProvider: DataProvider = {
       query.append('filter', JSON.stringify(filter));
     }
 
-    const response = await apiClient.get(`/dataprovider/${resource}?${query.toString()}`);
-    
-    // The server should return { data: [...], total: number }
-    // If it returns an array directly, wrap it
-    const result = Array.isArray(response.data) 
-      ? {
-          data: response.data,
-          // Try to get total from headers as fallback
-          total: response.headers['x-total-count'] 
-            ? parseInt(response.headers['x-total-count'])
-            : response.data.length
-        }
-      : response.data;
-    
-    // Debug logging for pagination
-    console.log('Pagination debug:', {
-      resource,
-      page: params.pagination?.page,
-      perPage: params.pagination?.perPage,
-      responseData: Array.isArray(response.data) ? 'array' : 'object',
-      total: result.total,
-      dataLength: result.data?.length
-    });
+    try {
+      const response = await apiClient.get(`/dataprovider/${resource}?${query.toString()}`);
+      
+      // The server should return { data: [...], total: number }
+      // If it returns an array directly, wrap it
+      const result = Array.isArray(response.data) 
+        ? {
+            data: response.data,
+            // Try to get total from headers as fallback
+            total: response.headers['x-total-count'] 
+              ? parseInt(response.headers['x-total-count'])
+              : response.data.length
+          }
+        : response.data;
+      
+      // Debug logging for pagination
+      console.log('Pagination debug:', {
+        resource,
+        page: params.pagination?.page,
+        perPage: params.pagination?.perPage,
+        responseData: Array.isArray(response.data) ? 'array' : 'object',
+        total: result.total,
+        dataLength: result.data?.length
+      });
 
-    return result;
+      return result;
+    } catch (error) {
+      console.error('DataProvider error:', error);
+      throw error;
+    }
   },
 
   getOne: async (resource: string, params: any) => {

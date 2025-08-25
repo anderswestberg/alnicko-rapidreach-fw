@@ -291,10 +291,11 @@ export class DeviceMqttClient extends EventEmitter {
             source: parsed.source || deviceId,
             level: (p.level || 'info').toLowerCase(),
             message: p.message !== undefined ? p.message : JSON.stringify(p),
-            // Handle timestamp - if it's a number, assume it's ms since boot
+            // Handle timestamp - if it's a number less than 1 billion, assume it's ms since boot
+            // Otherwise it's a Unix timestamp in milliseconds
             timestamp: p.timestamp 
               ? (typeof p.timestamp === 'number' && p.timestamp < 1000000000 
-                 ? new Date(now.getTime() - (Date.now() - p.timestamp))
+                 ? now  // For boot-relative timestamps, just use current time for now
                  : new Date(p.timestamp))
               : now,
             module: p.module || 'unknown',

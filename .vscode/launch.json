@@ -3,22 +3,107 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "STlink launch",
+            "type": "node",
+            "request": "attach",
+            "name": "Attach to Device Server (9229)",
+            "address": "localhost",
+            "port": 9229,
+            "restart": true,
+            "protocol": "inspector",
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/device-server/dist/**/*.js",
+                "${workspaceFolder}/device-server/src/**/*.ts"
+            ],
+            "sourceMaps": true
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Device Server (tsx dev)",
+            "cwd": "${workspaceFolder}/device-server",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev"
+            ],
+            "env": {
+                "NODE_OPTIONS": "--inspect=0.0.0.0:9229"
+            },
+            "console": "integratedTerminal",
+            "protocol": "inspector",
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ]
+        },
+        {
+            "name": "Program and Debug",
+            "cwd": "${workspaceRoot}",
+            "preLaunchTask": "Program Firmware",
+            "executable": "build/zephyr/zephyr.elf",
+            "request": "attach",
+            "type": "cortex-debug",
+            "servertype": "stlink",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "raw",
+            "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
+            "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
+            "device": "STM32H573II",
+            "interface": "swd",
+            "serialNumber": "004B001F3234510936303532",
+            "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver"
+        },
+        {
+            "name": "STlink launch (Simple)",
+            "cwd": "${workspaceRoot}",
+            "executable": "build/zephyr/zephyr.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "stlink",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "raw",
+            "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
+            "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
+            "device": "STM32H573II",
+            "interface": "swd",
+            "serialNumber": "004B001F3234510936303532",
+            "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
+            "serverArgs": ["-p", "61234", "-g", "-m", "0"]
+        },
+        {
+            "name": "STlink launch (External Server)",
             "cwd": "${workspaceRoot}",
             "preLaunchTask": "Start ST-LINK GDB Server",
-            "executable": "${command:zephyr-ide.select-active-build-path}/rapidreach-fw/zephyr/zephyr.elf",
+            "executable": "build/zephyr/zephyr.elf",
             "request": "launch",
             "type": "cortex-debug",
             "servertype": "external",
-            "runToMain": true, 
-            "gdbTarget": ":61234", 
             "runToEntryPoint": "main",
+            "gdbTarget": "localhost:61234", 
             "showDevDebugOutput": "raw",
-            "armToolchainPath": "/usr/bin/",
+            "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
+            "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
             "overrideLaunchCommands": [
+                "monitor reset halt",
                 "load",
-                "monitor reset"
-            ],
+                "monitor reset halt"
+            ]
+        },
+        {
+            "name": "Simple Debug (Connect to Port 50000)",
+            "type": "cortex-debug",
+            "request": "attach",
+            "cwd": "${workspaceRoot}",
+            "executable": "build/zephyr/zephyr.elf",
+            "servertype": "external",
+            "gdbTarget": "localhost:50000",
+            "showDevDebugOutput": "raw",
+            "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
+            "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb"
         }
     ]
 }

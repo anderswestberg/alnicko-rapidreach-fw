@@ -19,8 +19,9 @@ import {
   Grid,
   Chip,
   Paper,
+  CircularProgress,
 } from '@mui/material';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { dataProvider } from '../dataProvider';
 import SendIcon from '@mui/icons-material/Send';
 
@@ -86,8 +87,9 @@ const CommandExecutor = () => {
   const refresh = useRefresh();
   const notify = useNotify();
   const [command, setCommand] = useState('');
-  const [output, setOutput] = useState('');
+  const [commandHistory, setCommandHistory] = useState<Array<{command: string, output: string, timestamp: Date}>>([]);
   const [loading, setLoading] = useState(false);
+  const terminalRef = useRef<HTMLDivElement>(null);
   
   if (!record || record.status !== 'online') {
     return (
@@ -106,20 +108,40 @@ const CommandExecutor = () => {
     }
     
     setLoading(true);
+    const currentCommand = command.trim();
+    setCommand(''); // Clear input immediately for better UX
+    
     try {
       const result = await dataProvider.update('devices', {
         id: record.id,
-        data: { command: command.trim() },
+        data: { command: currentCommand },
         previousData: record,
       });
       
-      setOutput(result.data.output || 'Command executed successfully');
+      const output = result.data.output || 'Command executed successfully';
+      setCommandHistory(prev => [...prev, {
+        command: currentCommand,
+        output: output,
+        timestamp: new Date()
+      }]);
+      
       notify('Command executed successfully', { type: 'success' });
       refresh();
+      
+      // Scroll to bottom after adding new entry
+      setTimeout(() => {
+        if (terminalRef.current) {
+          terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+        }
+      }, 100);
     } catch (error: any) {
       const message = error.response?.data?.error || error.message || 'Failed to execute command';
       notify(message, { type: 'error' });
-      setOutput(`Error: ${message}`);
+      setCommandHistory(prev => [...prev, {
+        command: currentCommand,
+        output: `Error: ${message}`,
+        timestamp: new Date()
+      }]);
     } finally {
       setLoading(false);
     }
@@ -137,6 +159,46 @@ const CommandExecutor = () => {
       <Typography variant="h6" gutterBottom>
         Execute Command
       </Typography>
+      
+      {/* Terminal History */}
+      <Paper 
+        ref={terminalRef}
+        sx={{ 
+          mb: 2,
+          p: 2, 
+          backgroundColor: '#1e1e1e',
+          color: '#ffffff',
+          fontFamily: 'monospace',
+          fontSize: '0.875rem',
+          minHeight: '300px',
+          maxHeight: '500px',
+          overflowY: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all',
+        }}
+      >
+        {commandHistory.length === 0 ? (
+          <Typography sx={{ color: '#888', fontFamily: 'monospace' }}>
+            Ready to execute commands...
+          </Typography>
+        ) : (
+          commandHistory.map((entry, index) => (
+            <Box key={index} sx={{ mb: 2 }}>
+              <Box sx={{ color: '#00ff00' }}>
+                $ {entry.command}
+              </Box>
+              <Box sx={{ color: '#ffffff', mt: 0.5 }}>
+                {entry.output}
+              </Box>
+              {index < commandHistory.length - 1 && (
+                <Box sx={{ borderBottom: '1px solid #333', mt: 2, mb: 2 }} />
+              )}
+            </Box>
+          ))
+        )}
+      </Paper>
+      
+      {/* Command Input */}
       <Box sx={{ display: 'flex', gap: 1 }}>
         <MuiTextField
           fullWidth
@@ -146,32 +208,21 @@ const CommandExecutor = () => {
           onChange={(e) => setCommand(e.target.value)}
           onKeyPress={handleKeyPress}
           disabled={loading}
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              fontFamily: 'monospace',
+            }
+          }}
         />
         <Button
           variant="contained"
           onClick={executeCommand}
           disabled={loading}
-          startIcon={<SendIcon />}
+          startIcon={loading ? <CircularProgress size={20} /> : <SendIcon />}
         >
           Execute
         </Button>
       </Box>
-      
-      {output && (
-        <Paper 
-          sx={{ 
-            mt: 2, 
-            p: 2, 
-            backgroundColor: '#f5f5f5',
-            fontFamily: 'monospace',
-            fontSize: '0.875rem',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
-        >
-          {output}
-        </Paper>
-      )}
     </Box>
   );
 };

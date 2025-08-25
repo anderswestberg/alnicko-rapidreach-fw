@@ -35,6 +35,7 @@ const DeviceFilter = (props: any) => (
 );
 
 const StatusField = ({ record }: any) => {
+  if (!record) return null;
   const color = record.status === 'online' ? 'success' : 'error';
   return <Chip label={record.status} color={color} size="small" />;
 };
@@ -42,7 +43,7 @@ const StatusField = ({ record }: any) => {
 export const DeviceList = () => (
   <List filters={<DeviceFilter />} sort={{ field: 'lastSeen', order: 'DESC' }}>
     <Datagrid rowClick="show">
-      <TextField source="id" label="Device ID" />
+      <TextField source="clientId" label="Device ID" />
       <ChipField source="type" label="Type" />
       <FunctionField label="Status" render={StatusField} />
       <DateField source="lastSeen" label="Last Seen" showTime />

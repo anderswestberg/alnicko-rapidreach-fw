@@ -78,7 +78,7 @@ function App() {
         list={DeviceList}
         show={DeviceShow}
         icon={DevicesIcon}
-        recordRepresentation="id"
+        recordRepresentation="clientId"
       />
       <Resource 
         name="logs" 

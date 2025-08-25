@@ -2,17 +2,43 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "Reset Target and Prepare Debug",
+            "type": "shell",
+            "command": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin/STM32_Programmer_CLI",
+            "args": [
+                "-c", "port=SWD", "sn=004B001F3234510936303532", "mode=HOTPLUG",
+                "-hardRst"
+            ],
+            "group": "build"
+        },
+        {
+            "label": "Program Firmware",
+            "type": "shell",
+            "command": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin/STM32_Programmer_CLI",
+            "args": [
+                "-c", "port=SWD", "sn=004B001F3234510936303532", "mode=HOTPLUG",
+                "-hardRst",
+                "-w", "build/zephyr/zephyr.hex",
+                "-v",
+                "-rst"
+            ],
+            "group": "build",
+            "dependsOn": "Reset Target and Prepare Debug"
+        },
+        {
             "label": "Start ST-LINK GDB Server",
             "type": "shell",
-            "command": "/opt/st/stm32cubeide*/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.*/tools/bin/ST-LINK_gdbserver",
+            "command": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
             "args": [
                 "-p", "61234",
                 "-l", "1",
                 "-d",
                 "-s",
-                "-cp", "/opt/st/stm32cubeide*/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.*/tools/bin",
-                "-m", "1",
-                "-k"
+                "-cp", "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin",
+                "-m", "0",
+                "--swd",
+                "-i", "004B001F3234510936303532",
+                "-g"
             ],
             "problemMatcher": [],
             "isBackground": true,  
@@ -20,6 +46,7 @@
                 "kind": "build",
                 "isDefault": true
             },
+            "dependsOn": "Reset Target and Prepare Debug"
         },
         {
             "label": "Generate Firmware Updates",
@@ -46,6 +73,23 @@
                 "kind": "build",
                 "isDefault": false
             }
+        },
+        {
+            "label": "Device Server: Start (debug)",
+            "type": "shell",
+            "command": "npm",
+            "args": [
+                "run",
+                "dev"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/device-server",
+                "env": {
+                    "NODE_OPTIONS": "--inspect=0.0.0.0:9229"
+                }
+            },
+            "isBackground": true,
+            "problemMatcher": []
         }
     ]
 }

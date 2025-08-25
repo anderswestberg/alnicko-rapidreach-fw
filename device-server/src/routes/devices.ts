@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { DeviceMqttClient } from '../services/mqtt-client.js';
 import logger from '../utils/logger.js';
+import { getCollection } from '../db/mongo.js';
+import { ObjectId } from 'mongodb';
 
 // Request validation schemas
 const executeCommandSchema = z.object({
@@ -103,18 +105,39 @@ export function createDeviceRoutes(mqttClient: DeviceMqttClient): Router {
         return;
       }
 
+      // Look up the device in MongoDB to get its clientId
+      const devicesCollection = getCollection('devices');
+      let device: any;
+      
+      // Try to parse as ObjectId if it looks like one
+      if (ObjectId.isValid(deviceId) && deviceId.length === 24) {
+        device = await devicesCollection.findOne({ _id: new ObjectId(deviceId) });
+      } else {
+        device = await devicesCollection.findOne({ $or: [{ clientId: deviceId }, { id: deviceId }] });
+      }
+      
+      if (!device || !device.clientId) {
+        res.status(404).json({
+          success: false,
+          error: 'Device not found or missing clientId',
+        });
+        return;
+      }
+
       const { command, timeout = 5000 } = validation.data;
       const startTime = Date.now();
 
-      logger.info(`Executing command on device ${deviceId}: ${command}`);
+      logger.info(`Executing command on device ${device.clientId}: ${command}`);
 
       try {
-        const output = await mqttClient.sendCommand(deviceId, command, timeout);
+        // Use the clientId + "-shell" for MQTT shell commands
+        const shellClientId = device.clientId.endsWith('-shell') ? device.clientId : `${device.clientId.split('-')[0]}-shell`;
+        const output = await mqttClient.sendCommand(shellClientId, command, timeout);
         const executionTime = Date.now() - startTime;
 
         res.json({
           success: true,
-          deviceId,
+          deviceId: device.clientId,
           command,
           output,
           timestamp: new Date(),

@@ -22,14 +22,12 @@ export const config = {
     id: process.env.DEVICE_ID || 'rapidreach_device',
     // Zephyr built-in MQTT shell topics: devices/<deviceId>/rx (input), devices/<deviceId>/tx (output)
     commandTopic: (deviceId: string) => {
-      // Use only first 6 characters of device ID for topic
-      const shortId = deviceId.substring(0, 6);
-      return `devices/${shortId}/rx`;
+      // Use deviceId as-is to allow IDs like "313938-shell"
+      return `devices/${deviceId}/rx`;
     },
     responseTopic: (deviceId: string) => {
-      // Use only first 6 characters of device ID for topic
-      const shortId = deviceId.substring(0, 6);
-      return `devices/${shortId}/tx`;
+      // Use deviceId as-is to allow IDs like "313938-shell"
+      return `devices/${deviceId}/tx`;
     },
   },
   terminal: {

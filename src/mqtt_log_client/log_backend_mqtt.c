@@ -20,13 +20,35 @@
 static uint8_t mqtt_log_buf[MQTT_LOG_BACKEND_BUF_SIZE];
 static uint32_t log_format_current = CONFIG_LOG_BACKEND_MQTT_OUTPUT_DEFAULT;
 
+static size_t mqtt_log_buf_pos = 0;
+
+/* Log output processing function */
+static int mqtt_log_output(uint8_t *data, size_t length, void *ctx)
+{
+    ARG_UNUSED(ctx);
+    
+    /* Capture formatted log output into buffer */
+    size_t remaining = MQTT_LOG_BACKEND_BUF_SIZE - mqtt_log_buf_pos - 1;
+    if (remaining > 0 && length > 0) {
+        size_t copy_len = (length > remaining) ? remaining : length;
+        memcpy(&mqtt_log_buf[mqtt_log_buf_pos], data, copy_len);
+        mqtt_log_buf_pos += copy_len;
+        mqtt_log_buf[mqtt_log_buf_pos] = '\0';
+    }
+    return (int)length;
+}
+
+LOG_OUTPUT_DEFINE(mqtt_log_output_instance, mqtt_log_output, mqtt_log_buf, MQTT_LOG_BACKEND_BUF_SIZE);
+
 static void mqtt_log_backend_process(const struct log_backend *const backend,
                                     union log_msg_generic *msg)
 {
-    char str[MQTT_LOG_BACKEND_BUF_SIZE];
     const char *level_str = "info";
-    size_t len;
-    uint32_t flags = 0;
+    uint32_t flags = 0;  /* We'll format just the message content */
+    
+    /* Reset buffer position */
+    mqtt_log_buf_pos = 0;
+    mqtt_log_buf[0] = '\0';
     
     /* Get the log level from the message header */
     uint8_t level = log_msg_get_level(&msg->log);
@@ -46,20 +68,21 @@ static void mqtt_log_backend_process(const struct log_backend *const backend,
         break;
     }
     
-    /* Extract the log message - simplified approach */
-    /* For now, just get the raw string data */
-    const char *msg_str = log_msg_get_package(&msg->log, &len);
-    if (msg_str && len > 0) {
-        /* Copy to our buffer */
-        size_t copy_len = len < sizeof(str) - 1 ? len : sizeof(str) - 1;
-        memcpy(str, msg_str, copy_len);
-        str[copy_len] = '\0';
+    /* Format the log message using the log output API */
+    log_output_msg_process(&mqtt_log_output_instance, &msg->log, flags);
+    
+    /* Get timestamp - use uptime for now, RTC conversion happens at publish time */
+    uint64_t timestamp_ms = k_uptime_get();
+    
+    /* Send to MQTT log client if we have a message */
+    if (mqtt_log_buf_pos > 0) {
+        /* Remove trailing newline if present */
+        if (mqtt_log_buf[mqtt_log_buf_pos-1] == '\n') {
+            mqtt_log_buf[mqtt_log_buf_pos-1] = '\0';
+            mqtt_log_buf_pos--;
+        }
         
-        /* Get timestamp */
-        uint64_t timestamp_ms = k_uptime_get();
-        
-        /* Send to MQTT log client */
-        mqtt_log_client_put(level_str, str, timestamp_ms);
+        mqtt_log_client_put(level_str, (char *)mqtt_log_buf, timestamp_ms);
     }
 }
 
