@@ -45,6 +45,8 @@ rsource "mqtt_module/Kconfig.mqtt"
 rsource "http_module/Kconfig.http"
 rsource "http_log_client/Kconfig"
 rsource "mqtt_log_client/Kconfig.mqtt_log"
+rsource "device_registry/Kconfig.device_registry"
+rsource "init_state_machine/Kconfig.init_sm"
 
 
 endif # RPR_NETWORKING

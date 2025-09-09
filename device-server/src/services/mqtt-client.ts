@@ -286,30 +286,55 @@ export class DeviceMqttClient extends EventEmitter {
             source: parsed.source,
             firstLog: parsed.logs[0]
           });
-          items = parsed.logs.map((p: any) => ({
-            deviceId: parsed.source || deviceId,
-            source: parsed.source || deviceId,
-            level: (p.level || 'info').toLowerCase(),
-            message: p.message !== undefined ? p.message : JSON.stringify(p),
-            // Handle timestamp - if it's a number less than 1 billion, assume it's ms since boot
-            // Otherwise it's a Unix timestamp in milliseconds
-            timestamp: p.timestamp 
-              ? (typeof p.timestamp === 'number' && p.timestamp < 1000000000 
-                 ? now  // For boot-relative timestamps, just use current time for now
-                 : new Date(p.timestamp))
-              : now,
-            module: p.module || 'unknown',
-          }));
+          items = parsed.logs.map((p: any) => {
+            const level = (p.level || 'info').toLowerCase();
+            // Map level to numeric severity
+            const levelMap: Record<string, number> = {
+              'error': 4,
+              'warn': 3,
+              'warning': 3,
+              'info': 2,
+              'debug': 1
+            };
+            
+            return {
+              deviceId: parsed.source || deviceId,
+              source: p.module || 'unknown',  // Use module as source instead of deviceId
+              level: level,
+              levelNo: levelMap[level] || 2, // Default to info (2) if unknown
+              message: p.message !== undefined ? p.message : JSON.stringify(p),
+              // Handle timestamp - if it's a number less than 1 billion, assume it's ms since boot
+              // Otherwise it's a Unix timestamp in milliseconds
+              timestamp: p.timestamp 
+                ? (typeof p.timestamp === 'number' && p.timestamp < 1000000000 
+                   ? now  // For boot-relative timestamps, just use current time for now
+                   : new Date(p.timestamp))
+                : now,
+              module: p.module || 'unknown',
+            };
+          });
         } else if (Array.isArray(parsed)) {
           // Handle array of logs
-          items = parsed.map((p) => ({
-            deviceId,
-            source: deviceId,
-            level: (p.level || 'info').toLowerCase(),
-            message: p.message || JSON.stringify(p),
-            timestamp: p.timestamp ? new Date(p.timestamp) : now,
-            ...p,
-          }));
+          items = parsed.map((p) => {
+            const level = (p.level || 'info').toLowerCase();
+            const levelMap: Record<string, number> = {
+              'error': 4,
+              'warn': 3,
+              'warning': 3,
+              'info': 2,
+              'debug': 1
+            };
+            
+            return {
+              deviceId,
+              source: p.module || 'unknown',  // Use module as source
+              level: level,
+              levelNo: levelMap[level] || 2,
+              message: p.message || JSON.stringify(p),
+              timestamp: p.timestamp ? new Date(p.timestamp) : now,
+              ...p,
+            };
+          });
         } else {
           // Handle single log entry
           logger.warn(`Treating as single log entry from ${deviceId}:`, {
@@ -317,10 +342,19 @@ export class DeviceMqttClient extends EventEmitter {
             keys: Object.keys(parsed),
             textPreview: text.substring(0, 100)
           });
+          const level = (parsed.level || 'info').toLowerCase();
+          const levelMap: Record<string, number> = {
+            'error': 4,
+            'warn': 3,
+            'warning': 3,
+            'info': 2,
+            'debug': 1
+          };
           items = [{
             deviceId,
-            source: deviceId,
-            level: (parsed.level || 'info').toLowerCase(),
+            source: parsed.module || 'unknown',  // Use module as source
+            level: level,
+            levelNo: levelMap[level] || 2,
             message: parsed.message || text,
             timestamp: parsed.timestamp ? new Date(parsed.timestamp) : now,
             ...parsed,
@@ -330,8 +364,9 @@ export class DeviceMqttClient extends EventEmitter {
         // Not JSON, store as simple text log
         items = [{
           deviceId,
-          source: deviceId,
+          source: 'unknown',  // No module info in plain text
           level: 'info',
+          levelNo: 2,  // Info level
           message: text,
           timestamp: now,
         }];

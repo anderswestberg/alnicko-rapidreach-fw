@@ -55,6 +55,7 @@ Thumbs.db
 secrets/
 *.pem
 *.key
+prj-secrets.conf
 
 # Zethyr files
 external/

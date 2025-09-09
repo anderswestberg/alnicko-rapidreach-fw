@@ -1,0 +1,47 @@
+menuconfig RPR_MODULE_INIT_SM
+    bool "Enable initialization state machine"
+    default y
+    help
+      Enable state machine for managing device initialization sequence
+      including network connectivity, device registration, and MQTT setup.
+
+if RPR_MODULE_INIT_SM
+
+config RPR_MODULE_INIT_SM_LOG_LEVEL
+    int "Initialization state machine log level"
+    range 0 4
+    default 3
+    help
+      0=OFF, 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG
+
+config RPR_INIT_SM_NETWORK_TIMEOUT_SEC
+    int "Network wait timeout in seconds"
+    default 30
+    help
+      Maximum time to wait for network connectivity during initialization.
+
+config RPR_INIT_SM_REGISTRATION_TIMEOUT_SEC
+    int "Device registration timeout in seconds"
+    default 10
+    help
+      Maximum time to wait for device registration to complete.
+
+config RPR_INIT_SM_MQTT_TIMEOUT_SEC
+    int "MQTT connection timeout in seconds"
+    default 10
+    help
+      Maximum time to wait for MQTT connection to be established.
+
+config RPR_INIT_SM_MAX_RETRIES
+    int "Maximum retry count for failed operations"
+    default 3
+    help
+      Maximum number of retries for failed operations before giving up.
+
+config RPR_INIT_SM_RETRY_DELAY_SEC
+    int "Retry delay in seconds"
+    default 5
+    help
+      Delay between retry attempts after failures.
+
+endif # RPR_MODULE_INIT_SM

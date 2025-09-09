@@ -46,6 +46,7 @@ struct get_context {
     char  *response_buffer;
     size_t buffer_capacity;
     size_t response_len;
+    const char **headers;  /* Optional custom headers (NULL-terminated array) */
 };
 
 struct post_context {
@@ -73,6 +74,23 @@ struct post_context {
 http_status_t http_download_file_request(const char *url,
                                          const char *base_dir,
                                          uint16_t   *http_status_code);
+
+/**
+ * @brief Downloads a file with custom headers (e.g., for authentication).
+ *
+ * Similar to http_download_file_request but allows passing custom headers.
+ *
+ * @param url               Full HTTP or HTTPS URL of the file to download.
+ * @param base_dir          Base folder path where the file will be saved.
+ * @param headers           NULL-terminated array of header strings (e.g., "Authorization: token XXX")
+ * @param http_status_code  Pointer to store the HTTP response status code.
+ *
+ * @return HTTP_CLIENT_OK on success, or an appropriate `http_status_t` error code on failure.
+ */
+http_status_t http_download_file_request_with_headers(const char *url,
+                                                      const char *base_dir,
+                                                      const char **headers,
+                                                      uint16_t   *http_status_code);
 
 /**
  * @brief Sends an HTTP GET request to the specified URL and stores the response in a buffer.

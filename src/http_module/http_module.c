@@ -184,7 +184,7 @@ static int http_register_certificates(void)
         ret = tls_credential_add(CA_CERTIFICATE_TAG + i,
                                  TLS_CREDENTIAL_CA_CERTIFICATE,
                                  ca_certificates[i],
-                                 strlen(ca_certificates[i]) + 1);
+                                 strlen(ca_certificates[i]));
         if (ret < 0) {
             LOG_ERR("Failed to register certificate %d (err: %d)", i, ret);
             return ret;
@@ -734,13 +734,14 @@ http_status_t http_get_request(const char         *url,
     uint8_t recv_buf[CONFIG_RPR_HTTP_RECV_BUFFER_SIZE];
 
     struct http_request req = {
-        .method       = HTTP_GET,
-        .url          = ctx.url_context.path,
-        .host         = ctx.url_context.host,
-        .protocol     = "HTTP/1.1",
-        .response     = response_cb,
-        .recv_buf     = recv_buf,
-        .recv_buf_len = sizeof(recv_buf),
+        .method        = HTTP_GET,
+        .url           = ctx.url_context.path,
+        .host          = ctx.url_context.host,
+        .protocol      = "HTTP/1.1",
+        .header_fields = get_ctx->headers,  /* Add custom headers support */
+        .response      = response_cb,
+        .recv_buf      = recv_buf,
+        .recv_buf_len  = sizeof(recv_buf),
     };
 
     LOG_INF("Sending GET request...");

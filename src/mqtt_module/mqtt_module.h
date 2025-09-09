@@ -133,6 +133,29 @@ mqtt_status_t mqtt_module_subscribe(const char *topic, uint8_t qos, mqtt_message
  */
 mqtt_status_t mqtt_module_unsubscribe(const char *topic);
 
+/**
+ * @brief MQTT connection event types
+ */
+typedef enum {
+    MQTT_EVENT_CONNECTED,      /**< Connected to broker */
+    MQTT_EVENT_DISCONNECTED,   /**< Disconnected from broker */
+    MQTT_EVENT_CONNECT_FAILED  /**< Connection attempt failed */
+} mqtt_event_type_t;
+
+/**
+ * @brief MQTT event handler callback type
+ * 
+ * @param event_type Type of event that occurred
+ */
+typedef void (*mqtt_event_handler_t)(mqtt_event_type_t event_type);
+
+/**
+ * @brief Set the MQTT event handler callback
+ * 
+ * @param handler The event handler callback function (NULL to disable)
+ */
+void mqtt_set_event_handler(mqtt_event_handler_t handler);
+
 #ifdef __cplusplus
 }
 #endif

@@ -51,9 +51,14 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
       }
 
       const total = await col.countDocuments(mongoFilter);
+      
+      // If sorting by level, sort by levelNo instead for efficiency
+      const sortField = (field === 'level' && resource === 'logs') ? 'levelNo' : field;
+      const sortSpec = { [sortField]: order === 'ASC' ? 1 : -1 };
+      
       const cursor = col
         .find(mongoFilter)
-        .sort({ [field]: order === 'ASC' ? 1 : -1 })
+        .sort(sortSpec)
         .skip(start)
         .limit(limit);
       const items = await cursor.toArray();

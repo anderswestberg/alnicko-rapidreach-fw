@@ -129,15 +129,36 @@ static size_t append_json_item(char *buf, size_t buf_size, const struct mqtt_log
 		/* This looks like uptime in ms, try to get real time */
 		struct rtc_time current_time;
 		if (get_date_time(&current_time) == 0) {
-			/* RTC is available, convert to Unix timestamp */
-			time_t current_unix = mktime((struct tm *)&current_time);
-			if (current_unix != (time_t)-1) {
-				/* Convert to milliseconds and subtract uptime to get boot time */
-				int64_t current_ms = (int64_t)current_unix * 1000;
-				int64_t boot_time_ms = current_ms - k_uptime_get();
-				timestamp_to_send = boot_time_ms + e->timestamp;
+			/* The RTC might be storing the actual year (like 2025) in tm_year
+			 * instead of years since 1900. Check for both cases. */
+			int actual_year;
+			bool valid_rtc = false;
+			
+			if (current_time.tm_year > 1900) {
+				/* RTC is storing actual year */
+				actual_year = current_time.tm_year;
+				/* Need to adjust tm_year to standard format for mktime */
+				current_time.tm_year = actual_year - 1900;
+				valid_rtc = (actual_year >= 2020 && actual_year <= 2099);
+			} else if (current_time.tm_year >= 120 && current_time.tm_year < 200) {
+				/* RTC is storing years since 1900 (standard) */
+				actual_year = current_time.tm_year + 1900;
+				valid_rtc = true;
+			}
+			
+			if (valid_rtc) {
+				/* RTC is available and has valid time, convert to Unix timestamp */
+				time_t current_unix = mktime((struct tm *)&current_time);
+				if (current_unix != (time_t)-1) {
+					/* Convert to milliseconds and subtract uptime to get boot time */
+					int64_t current_ms = (int64_t)current_unix * 1000;
+					int64_t boot_time_ms = current_ms - k_uptime_get();
+					timestamp_to_send = boot_time_ms + e->timestamp;
+				}
 			}
 		}
+		/* If RTC is not valid, keep the uptime-based timestamp */
+		/* The server will handle it appropriately */
 	}
 
 	size_t used = 0;
@@ -266,9 +287,32 @@ int mqtt_log_client_put(const char *level, const char *message, uint64_t timesta
 	e.timestamp = (int64_t)timestamp_ms;
 	strncpy(e.level, level ? level : "info", sizeof(e.level) - 1);
 	e.level[sizeof(e.level) - 1] = '\0';
-	strncpy(e.module, "app", sizeof(e.module) - 1);
+	
+	/* Extract module/source from message if it contains "module_name: " pattern */
+	const char *msg_start = message;
+	char extracted_module[32] = "app";  /* Default if no module found */
+	
+	if (message) {
+		/* Look for first colon */
+		const char *colon = strchr(message, ':');
+		if (colon && colon > message) {
+			/* Check if there's a space after the colon */
+			if (*(colon + 1) == ' ') {
+				/* Extract the module name */
+				size_t module_len = colon - message;
+				if (module_len < sizeof(extracted_module)) {
+					memcpy(extracted_module, message, module_len);
+					extracted_module[module_len] = '\0';
+					/* Skip past "module: " for the actual message */
+					msg_start = colon + 2;
+				}
+			}
+		}
+	}
+	
+	strncpy(e.module, extracted_module, sizeof(e.module) - 1);
 	e.module[sizeof(e.module) - 1] = '\0';
-	strncpy(e.message, message ? message : "", sizeof(e.message) - 1);
+	strncpy(e.message, msg_start ? msg_start : "", sizeof(e.message) - 1);
 	e.message[sizeof(e.message) - 1] = '\0';
 
 	k_mutex_lock(&s.mutex, K_FOREVER);

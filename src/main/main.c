@@ -22,6 +22,12 @@
 #ifdef CONFIG_RPR_MQTT_LOG_CLIENT
 #include "../mqtt_log_client/mqtt_log_client.h"
 #endif
+#ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
+#include "../device_registry/device_registry.h"
+#endif
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+#include "../init_state_machine/init_state_machine.h"
+#endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -137,7 +143,33 @@ static struct k_thread network_startup_thread;
 
 int main(void)
 {
-    /* Start network services in a separate thread to avoid blocking main */
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+    /* Initialize and start the state machine for system startup */
+    int ret = init_state_machine_init();
+    if (ret < 0) {
+        LOG_ERR("Failed to initialize state machine: %d", ret);
+        /* Fall back to sequential startup */
+        k_thread_create(&network_startup_thread, 
+                        network_startup_stack,
+                        K_THREAD_STACK_SIZEOF(network_startup_stack),
+                        (k_thread_entry_t)network_startup_handler,
+                        NULL, NULL, NULL,
+                        K_PRIO_COOP(5), 0, K_NO_WAIT);
+        k_thread_name_set(&network_startup_thread, "network_startup");
+    } else {
+        /* Start the state machine */
+        init_state_machine_start();
+        
+        /* Wait for the state machine to reach operational state */
+        LOG_INF("Waiting for system to become operational...");
+        while (!init_state_machine_is_operational()) {
+            k_sleep(K_SECONDS(1));
+        }
+        LOG_INF("System is operational!");
+    }
+    
+#else
+    /* Use the old sequential startup if state machine is not enabled */
     k_thread_create(&network_startup_thread, 
                     network_startup_stack,
                     K_THREAD_STACK_SIZEOF(network_startup_stack),
@@ -145,6 +177,7 @@ int main(void)
                     NULL, NULL, NULL,
                     K_PRIO_COOP(5), 0, K_NO_WAIT);
     k_thread_name_set(&network_startup_thread, "network_startup");
+#endif
 
 #ifdef CONFIG_EXAMPLES_ENABLE_MAIN_EXAMPLES
     domain_logic_func();

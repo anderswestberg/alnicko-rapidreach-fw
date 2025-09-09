@@ -14,6 +14,7 @@
 #include <zephyr/kernel.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 #include "domain_logic.h"
 #include "power_supervisor.h"
@@ -54,6 +55,14 @@
 
 #ifdef CONFIG_RPR_MODULE_MQTT
 #include "../mqtt_module/mqtt_module.h"
+#endif
+
+#ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
+#include "../device_registry/device_registry.h"
+#endif
+
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+#include "../init_state_machine/init_state_machine.h"
 #endif
 
 #ifdef CONFIG_RPR_MODULE_DFU
@@ -307,13 +316,39 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
 #endif
 
 #ifdef CONFIG_RPR_MODULE_MQTT
-        /* Check if RTC is ready before initializing MQTT */
+        /* Check if RTC is ready and has valid time before initializing MQTT */
         struct rtc_time current_time;
         int rtc_ret = get_date_time(&current_time);
+        bool rtc_valid = false;
+        
         if (rtc_ret == 0) {
-            LOG_INF("RTC is ready, current year: %d", current_time.tm_year);
+            /* The RTC might be storing the actual year (like 2025) in tm_year
+             * instead of years since 1900. Check for both cases. */
+            int actual_year;
+            if (current_time.tm_year > 1900) {
+                /* RTC is storing actual year */
+                actual_year = current_time.tm_year;
+            } else {
+                /* RTC is storing years since 1900 (standard) */
+                actual_year = current_time.tm_year + 1900;
+            }
             
-            /* Initialize MQTT module now that we have network and RTC */
+            /* Check if year is reasonable (2020-2099) */
+            if (actual_year >= 2020 && actual_year <= 2099) {
+                LOG_INF("RTC has valid time: %04d-%02d-%02d %02d:%02d:%02d",
+                        actual_year, current_time.tm_mon + 1,
+                        current_time.tm_mday, current_time.tm_hour,
+                        current_time.tm_min, current_time.tm_sec);
+                rtc_valid = true;
+            } else {
+                LOG_WRN("RTC time invalid - year %d (expected 2020-2099)", actual_year);
+            }
+        } else {
+            LOG_WRN("RTC not ready yet (ret=%d)", rtc_ret);
+        }
+        
+        if (rtc_valid) {
+            /* Initialize MQTT module now that we have network and valid RTC */
             int ret = mqtt_init();
             if (ret == 0) {
                 LOG_INF("MQTT module initialized");
@@ -330,8 +365,8 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
                 LOG_ERR("Failed to initialize MQTT module: %d", ret);
             }
         } else {
-            LOG_WRN("RTC not ready yet (ret=%d), delaying MQTT initialization", rtc_ret);
-            /* TODO: Could retry later or use a work queue */
+            LOG_WRN("Delaying MQTT initialization until RTC has valid time");
+            /* TODO: Schedule a delayed work item to retry MQTT init when RTC is ready */
         }
 #endif
         
@@ -905,6 +940,8 @@ static void check_firmware(void)
  */
 void domain_logic_func(void)
 {
+    LOG_INF("Domain logic starting...");
+    
 #ifdef CONFIG_RPR_MODULE_DFU
     check_firmware(); // Confirm or log current firmware state
 #endif
@@ -915,12 +952,53 @@ void domain_logic_func(void)
     k_sem_init(&net_ctx.audio_play_sem, 0, 1);
     k_sem_init(&net_ctx.ping_thread_sem, 0, 1);
 
+    // Register supervisor callbacks early to prevent watchdog timeout
+    supervisor_ping_register_callback(domain_logic_ping);
+    supervisor_poweroff_register_callback(domain_logic_deinit);
+    
     // Register power button short press callbacks
     poweroff_register_short_push_callback(power_off_short_pressed);
 
-    // Register supervisor callbacks
-    supervisor_ping_register_callback(domain_logic_ping);
-    supervisor_poweroff_register_callback(domain_logic_deinit);
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+    // Initialize and start the initialization state machine
+    init_state_machine_init();
+    init_state_machine_start();
+    
+    // Wait for system to become operational
+    LOG_INF("Waiting for system initialization...");
+    uint32_t wait_count = 0;
+    while (!init_state_machine_is_operational()) {
+        k_msleep(100);
+        wait_count++;
+        
+        if (wait_count % 10 == 0) {
+            init_state_t current_state = init_state_machine_get_state();
+            LOG_INF("Still waiting... current state: %d", current_state);
+        }
+        
+        // Check if we're in error state with max retries exceeded
+        if (init_state_machine_get_state() == STATE_ERROR) {
+            LOG_ERR("System initialization failed");
+            break;
+        }
+        
+        // Timeout after 30 seconds
+        if (wait_count > 300) {
+            LOG_ERR("System initialization timeout");
+            break;
+        }
+    }
+    
+    if (init_state_machine_is_operational()) {
+        LOG_INF("System initialization complete, device ID: %s", 
+                init_state_machine_get_device_id());
+    }
+#else
+    // Legacy initialization sequence
+#ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
+    // Initialize device registry for deferred registration
+    device_registry_init();
+#endif
 
     // Setup network event handling
     net_mgmt_init_event_callback(
@@ -930,6 +1008,7 @@ void domain_logic_func(void)
 #ifdef CONFIG_EXAMPLES_DOMAIN_LOGIC_AUTO_CONNECT_ON_START
     network_attempt_connect();
 #endif
+#endif /* CONFIG_RPR_MODULE_INIT_SM */
 
     // Main loop: ping watchdog, run app logic, trigger audio
     while (true) {

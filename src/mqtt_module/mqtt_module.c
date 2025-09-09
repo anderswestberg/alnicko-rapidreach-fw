@@ -16,6 +16,13 @@
 #include <string.h>
 #include <errno.h>
 #include "../dev_info/dev_info.h"
+#ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
+#include "../device_registry/device_registry.h"
+#endif
+
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+#include "../init_state_machine/init_state_machine.h"
+#endif
 
 LOG_MODULE_REGISTER(mqtt_module, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
@@ -47,6 +54,9 @@ static int reconnect_attempts = 0;
 #define MAX_RECONNECT_INTERVAL_MS 300000  /* 5 minutes maximum */
 #define RECONNECT_BACKOFF_MULTIPLIER 2    /* Double the interval each failure */
 
+/* Event handler callback */
+static mqtt_event_handler_t event_handler = NULL;
+
 /* Subscription management */
 #define MAX_SUBSCRIPTIONS 8
 struct mqtt_subscription {
@@ -77,12 +87,27 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         if (evt->result != 0) {
             LOG_ERR("MQTT connect failed: %d", evt->result);
             mqtt_connected = false;
+            
+            /* Call the event handler if registered */
+            if (event_handler) {
+                event_handler(MQTT_EVENT_CONNECT_FAILED);
+            }
         } else {
             LOG_INF("MQTT client connected!");
             mqtt_connected = true;
             /* Reset reconnection backoff on successful connection */
+            
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+            /* Notify state machine of successful connection */
+            init_state_machine_send_event(EVENT_MQTT_CONNECTED);
+#endif
             reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
             reconnect_attempts = 0;
+            
+            /* Call the event handler if registered */
+            if (event_handler) {
+                event_handler(MQTT_EVENT_CONNECTED);
+            }
         }
         break;
 
@@ -90,6 +115,16 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         LOG_WRN("MQTT disconnected: %d", evt->result);
         mqtt_connected = false;
         /* Note: Automatic reconnection could be implemented here if needed */
+        
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+        /* Notify state machine of disconnection */
+        init_state_machine_send_event(EVENT_MQTT_DISCONNECTED);
+#endif
+        
+        /* Call the event handler if registered */
+        if (event_handler) {
+            event_handler(MQTT_EVENT_DISCONNECTED);
+        }
         break;
 
     case MQTT_EVT_PUBACK:
@@ -361,10 +396,50 @@ static int prepare_mqtt_client(void)
     /* Initialize MQTT client */
     mqtt_client_init(&client);
 
-    /* Generate client ID in format "XXXXXX-speaker" (6 digits only) */
+    /* Generate client ID */
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+    /* Get device ID from state machine */
+    const char *device_id = init_state_machine_get_device_id();
+    if (device_id && strlen(device_id) > 0) {
+        snprintf(client_id_buffer, sizeof(client_id_buffer), "%s-speaker", device_id);
+    } else {
+        LOG_ERR("No device ID available from state machine");
+        return -ENODEV;
+    }
+#else
+    /* Legacy device ID generation */
     size_t device_id_len;
-    const char *device_id = dev_info_get_device_id_str(&device_id_len);
-    snprintf(client_id_buffer, sizeof(client_id_buffer), "%.6s-speaker", device_id);
+    const char *full_device_id = dev_info_get_device_id_str(&device_id_len);
+    
+#ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
+    /* Try to register with GitHub registry and get a unique short ID */
+    device_registry_result_t reg_result;
+    int reg_ret = device_registry_register(
+        full_device_id,
+        CONFIG_RPR_DEVICE_REGISTRY_PREFERRED_ID_LENGTH,
+        CONFIG_RPR_DEVICE_REGISTRY_GITHUB_TOKEN,
+        CONFIG_RPR_DEVICE_REGISTRY_REPO_OWNER,
+        CONFIG_RPR_DEVICE_REGISTRY_REPO_NAME,
+        &reg_result
+    );
+    
+    if (reg_ret == 0) {
+        LOG_INF("Device registered with GitHub, using ID: %s (length: %d)", 
+                reg_result.assigned_id, reg_result.id_length);
+        snprintf(client_id_buffer, sizeof(client_id_buffer), "%s-speaker", reg_result.assigned_id);
+    } else if (reg_ret == -ENOTCONN) {
+        LOG_WRN("No network available, registration deferred, using temporary ID");
+        snprintf(client_id_buffer, sizeof(client_id_buffer), "%s-speaker", reg_result.assigned_id);
+    } else {
+        LOG_WRN("Failed to register with GitHub (%d), using default ID", reg_ret);
+        snprintf(client_id_buffer, sizeof(client_id_buffer), "%.6s-speaker", full_device_id);
+    }
+#else
+    /* Use default format "XXXXXX-speaker" (6 digits only) */
+    snprintf(client_id_buffer, sizeof(client_id_buffer), "%.6s-speaker", full_device_id);
+#endif
+#endif /* CONFIG_RPR_MODULE_INIT_SM */
+    
     LOG_INF("MQTT client ID: %s", client_id_buffer);
     
     /* MQTT client configuration */
@@ -799,5 +874,10 @@ mqtt_status_t mqtt_module_unsubscribe(const char *topic)
 /* Module initialization is now done after network connectivity is established */
 /* SYS_INIT(mqtt_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY); */
 #endif
+
+void mqtt_set_event_handler(mqtt_event_handler_t handler)
+{
+    event_handler = handler;
+}
 
 #endif /* CONFIG_RPR_MODULE_MQTT */
