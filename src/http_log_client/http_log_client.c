@@ -375,7 +375,7 @@ static int send_log_batch(struct log_entry *logs, uint16_t count)
     /* Try to resolve hostname - simplified version using static IP */
     if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
         /* For now, fallback to hardcoded IP if not a valid IP string */
-        inet_pton(AF_INET, "192.168.2.62", &addr.sin_addr);
+        inet_pton(AF_INET, "192.168.2.79", &addr.sin_addr);
     }
     
     if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {

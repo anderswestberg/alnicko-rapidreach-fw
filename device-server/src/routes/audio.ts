@@ -6,7 +6,7 @@ import multer from 'multer';
 import { promises as fs } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import path from 'path';
+// import path from 'path'; // Not used, commented out to fix TS error
 import { randomUUID } from 'crypto';
 
 const execAsync = promisify(exec);
@@ -146,7 +146,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       logger.debug(`Executing: ${ffmpegCommand}`);
 
       try {
-        const { stdout, stderr } = await execAsync(ffmpegCommand);
+        const { stderr } = await execAsync(ffmpegCommand);
         if (stderr && !stderr.includes('Qavg:')) { // ffmpeg writes progress to stderr
           logger.warn('ffmpeg stderr:', stderr);
         }
@@ -193,7 +193,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       try {
         await mqttClient.publish(topic, mqttPayload);
         
-        res.json({
+        return res.json({
           success: true,
           message: 'Audio alert sent successfully',
           details: {
@@ -215,7 +215,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
 
     } catch (error) {
       logger.error('Error processing audio alert:', error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: 'Internal server error',
         details: error instanceof Error ? error.message : 'Unknown error',
@@ -326,7 +326,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       const topic = `rapidreach/audio/${deviceId}`;
       await mqttClient.publish(topic, mqttPayload);
 
-      res.json({
+      return res.json({
         success: true,
         message: 'Opus audio sent successfully',
         details: {
@@ -339,7 +339,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
 
     } catch (error) {
       logger.error('Error sending Opus audio:', error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: 'Internal server error',
         details: error instanceof Error ? error.message : 'Unknown error',

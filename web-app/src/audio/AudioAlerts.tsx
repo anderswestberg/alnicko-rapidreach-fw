@@ -18,7 +18,7 @@ import {
   Stack,
   Chip,
 } from '@mui/material';
-import { useDataProvider, useNotify, useRefresh, Title } from 'react-admin';
+import { useDataProvider, useNotify, Title } from 'react-admin';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -54,17 +54,17 @@ export const AudioAlerts = () => {
   
   const dataProvider = useDataProvider();
   const notify = useNotify();
-  const refresh = useRefresh();
+  // const refresh = useRefresh(); // Unused, commented out
 
   // Load devices on mount
   React.useEffect(() => {
     dataProvider.getList('devices', {
-      filter: { status: 'online' },
+      filter: {}, // Show all devices, not just online ones
       pagination: { page: 1, perPage: 100 },
       sort: { field: 'id', order: 'ASC' },
     }).then(({ data }) => {
-      setDevices(data.filter((d: any) => d.status === 'online'));
-    }).catch(error => {
+      setDevices(data); // Show all devices, let user decide which to send to
+    }).catch(() => {
       notify('Failed to load devices', { type: 'error' });
     });
   }, [dataProvider, notify]);
@@ -118,7 +118,7 @@ export const AudioAlerts = () => {
 
     try {
       // Get auth token
-      const token = localStorage.getItem('auth_token');
+      // const token = localStorage.getItem('auth_token'); // Unused, commented out
       
       const response = await fetch(`${API_URL}/audio/alert`, {
         method: 'POST',
@@ -133,7 +133,7 @@ export const AudioAlerts = () => {
         throw new Error(error.error || 'Upload failed');
       }
 
-      const result = await response.json();
+      // const result = await response.json(); // Unused, commented out
       notify(`Audio alert sent to ${selectedDevice}`, { type: 'success' });
       
       // Reset form
@@ -173,7 +173,7 @@ export const AudioAlerts = () => {
                 >
                   {devices.map((device) => (
                     <MenuItem key={device.id} value={device.id}>
-                      {device.clientId || device.id} - {device.type}
+                      {device.clientId || device.id} - {device.type} ({device.status || 'unknown'})
                     </MenuItem>
                   ))}
                 </Select>

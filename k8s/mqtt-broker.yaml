@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emqx
+  namespace: rapidreach
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: emqx
+  template:
+    metadata:
+      labels:
+        app: emqx
+    spec:
+      containers:
+      - name: emqx
+        image: emqx/emqx:5.3.2
+        ports:
+        - containerPort: 1883
+          name: mqtt
+        - containerPort: 8883
+          name: mqtt-ssl
+        - containerPort: 8083
+          name: ws
+        - containerPort: 8084
+          name: wss
+        - containerPort: 18083
+          name: dashboard
+        env:
+        - name: EMQX_NAME
+          value: "emqx"
+        - name: EMQX_HOST
+          value: "127.0.0.1"
+        - name: EMQX_DASHBOARD__DEFAULT_USERNAME
+          value: "admin"
+        - name: EMQX_DASHBOARD__DEFAULT_PASSWORD
+          value: "public"
+        - name: EMQX_ALLOW_ANONYMOUS
+          value: "false"
+        - name: EMQX_AUTH__USER__1__USERNAME
+          value: "admin"
+        - name: EMQX_AUTH__USER__1__PASSWORD
+          value: "public"
+        - name: EMQX_ACL_NOMATCH
+          value: "allow"
+        - name: EMQX_ACL_FILE_ENABLE
+          value: "off"
+        - name: EMQX_LOADED_PLUGINS
+          value: "emqx_recon,emqx_retainer,emqx_management,emqx_dashboard"
+        volumeMounts:
+        - name: emqx-data
+          mountPath: /opt/emqx/data
+        - name: emqx-log
+          mountPath: /opt/emqx/log
+        livenessProbe:
+          exec:
+            command:
+            - emqx
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - emqx
+            - ping
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: emqx-data
+        emptyDir: {}
+      - name: emqx-log
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emqx
+  namespace: rapidreach
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "192.168.2.79"
+spec:
+  type: LoadBalancer
+  selector:
+    app: emqx
+  ports:
+  - port: 1883
+    targetPort: 1883
+    name: mqtt
+    protocol: TCP
+  - port: 8883
+    targetPort: 8883
+    name: mqtt-ssl
+    protocol: TCP
+  - port: 8083
+    targetPort: 8083
+    name: ws
+    protocol: TCP
+  - port: 8084
+    targetPort: 8084
+    name: wss
+    protocol: TCP
+  - port: 18083
+    targetPort: 18083
+    name: dashboard
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emqx-internal
+  namespace: rapidreach
+spec:
+  type: ClusterIP
+  selector:
+    app: emqx
+  ports:
+  - port: 1883
+    targetPort: 1883
+    name: mqtt
+    protocol: TCP

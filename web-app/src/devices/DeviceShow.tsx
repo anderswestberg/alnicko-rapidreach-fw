@@ -10,8 +10,6 @@ import {
   useNotify,
 } from 'react-admin';
 import {
-  Card,
-  CardContent,
   Typography,
   Box,
   Button,

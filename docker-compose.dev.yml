@@ -1,0 +1,63 @@
+# Development Docker Compose - Only Database and MQTT Broker
+# The device-server runs on the host for easier debugging
+
+services:
+  # EMQX MQTT Broker
+  emqx:
+    image: emqx/emqx:5.3.2
+    container_name: rapidreach-emqx-dev
+    ports:
+      - "1883:1883"   # MQTT TCP
+      - "8883:8883"   # MQTT SSL
+      - "8083:8083"   # MQTT WebSocket
+      - "8084:8084"   # MQTT WSS
+      - "18083:18083" # Dashboard (http://localhost:18083)
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_HOST=127.0.0.1
+      - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=public
+      - EMQX_ALLOW_ANONYMOUS=false
+      - EMQX_AUTH__USER__1__USERNAME=admin
+      - EMQX_AUTH__USER__1__PASSWORD=public
+      - EMQX_ACL_NOMATCH=allow
+      - EMQX_ACL_FILE_ENABLE=off
+      - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard"
+    volumes:
+      - emqx-data:/opt/emqx/data
+      - emqx-log:/opt/emqx/log
+    restart: unless-stopped
+    networks:
+      - rapidreach-dev-net
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MongoDB Database
+  mongo:
+    image: mongo:6
+    container_name: rapidreach-mongo-dev
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+    networks:
+      - rapidreach-dev-net
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  emqx-data:
+  emqx-log:
+  mongo-data:
+
+networks:
+  rapidreach-dev-net:
+    driver: bridge
+    name: rapidreach-dev

@@ -1,6 +1,5 @@
 import { Resource } from 'react-admin';
-import type { MenuProps, AuthProvider } from 'react-admin';
-import { Admin, Layout } from '@react-admin/ra-enterprise';
+import { Admin } from '@react-admin/ra-enterprise';
 import { dataProvider } from './dataProvider';
 import { Dashboard } from './Dashboard';
 import { DeviceList } from './devices/DeviceList';
@@ -40,16 +39,7 @@ const theme = createTheme({
   },
 });
 
-// Custom menu - temporarily simplified
-const CustomMenu = (props: MenuProps) => null; // Using default menu for now
-
-// Custom layout with enterprise features and theme toggle
-const CustomLayout = (props: any) => (
-  <Layout 
-    {...props} 
-    appBar={Layout.AppBar}
-  />
-);
+// Custom menu and layout temporarily removed
 
 function App() {
   return (

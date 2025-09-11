@@ -54,7 +54,7 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
       
       // If sorting by level, sort by levelNo instead for efficiency
       const sortField = (field === 'level' && resource === 'logs') ? 'levelNo' : field;
-      const sortSpec = { [sortField]: order === 'ASC' ? 1 : -1 };
+      const sortSpec: Record<string, 1 | -1> = { [sortField]: order === 'ASC' ? 1 : -1 };
       
       const cursor = col
         .find(mongoFilter)
