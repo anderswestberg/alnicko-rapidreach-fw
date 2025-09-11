@@ -151,6 +151,7 @@ static void retry_work_handler(struct k_work *work)
 {
     LOG_INF("Retry work handler called, current state: %s (%d)", 
             state_table[sm_context.current_state].name, sm_context.current_state);
+    LOG_ERR("DEBUG: Sending EVENT_RETRY to state machine");
     process_event(EVENT_RETRY);
 }
 
@@ -279,6 +280,20 @@ static void state_network_ready_entry(init_sm_context_t *ctx, init_event_t event
 #else
     /* Skip device registration if not configured */
     LOG_INF("Device registry not enabled, skipping to MQTT");
+    
+    /* Use the first 6 characters of hardware device ID as fallback */
+    size_t device_id_len;
+    const char *full_device_id = dev_info_get_device_id_str(&device_id_len);
+    if (full_device_id && device_id_len >= 6) {
+        strncpy(ctx->device_id, full_device_id, 6);
+        ctx->device_id[6] = '\0';
+        LOG_INF("Using fallback device ID: %s", ctx->device_id);
+    } else {
+        LOG_ERR("Failed to get device ID, using default");
+        strncpy(ctx->device_id, "000000", sizeof(ctx->device_id) - 1);
+    }
+    ctx->device_registered = false;
+    
     state_transition(ctx, STATE_MQTT_INIT_START);
 #endif
 }
@@ -301,13 +316,18 @@ static void state_device_reg_in_progress_entry(init_sm_context_t *ctx, init_even
 static void state_device_reg_complete_entry(init_sm_context_t *ctx, init_event_t event)
 {
     LOG_INF("Entering DEVICE_REG_COMPLETE state, device ID: %s", ctx->device_id);
+    LOG_ERR("DEBUG: DEVICE_REG_COMPLETE - forcing transition to MQTT_INIT_START");
     /* This is a transient state - schedule immediate transition */
     k_work_schedule(&ctx->retry_work, K_MSEC(1));
+    
+    /* Force immediate transition to MQTT_INIT_START if retry work doesn't fire */
+    state_transition(ctx, STATE_MQTT_INIT_START);
 }
 
 static void state_mqtt_init_start_entry(init_sm_context_t *ctx, init_event_t event)
 {
     LOG_INF("Entering MQTT_INIT_START state");
+    LOG_ERR("DEBUG: MQTT_INIT_START reached! Event=%d, retry_count=%d", event, ctx->retry_count);
     ctx->retry_count = 0;
     
     /* Schedule the initialization to run after state machine settles */
@@ -332,6 +352,10 @@ static void state_operational_entry(init_sm_context_t *ctx, init_event_t event)
     LOG_INF("Device ID: %s", ctx->device_id);
     
 #ifdef CONFIG_RPR_MODULE_MQTT
+    /* Start heartbeat */
+    LOG_INF("Starting MQTT heartbeat");
+    mqtt_start_heartbeat();
+    
     /* Initialize MQTT audio handler */
     int ret = mqtt_audio_handler_init();
     if (ret == 0) {
@@ -529,9 +553,11 @@ static void state_mqtt_init_start_handler(init_sm_context_t *ctx, init_event_t e
             event == EVENT_RETRY ? "RETRY" : "TIMEOUT");
 
     LOG_INF("Starting MQTT initialization with device ID: %s", ctx->device_id);
+    LOG_ERR("DEBUG: Calling mqtt_init()");
     
     /* Initialize MQTT with the assigned device ID */
     ret = mqtt_init();
+    LOG_ERR("DEBUG: mqtt_init() returned %d", ret);
     if (ret == 0 || ret == -EALREADY) {
         if (ret == -EALREADY) {
             LOG_WRN("MQTT module already initialized");
@@ -570,10 +596,12 @@ static void state_mqtt_connecting_handler(init_sm_context_t *ctx, init_event_t e
     switch (event) {
     case EVENT_MQTT_CONNECTED:
         LOG_INF("MQTT connected successfully");
+        LOG_ERR("DEBUG: Starting heartbeat and transitioning to OPERATIONAL");
         ctx->mqtt_connected = true;
         
 #ifdef CONFIG_RPR_MODULE_MQTT
         /* Start heartbeat if configured */
+        LOG_INF("Starting MQTT heartbeat");
         mqtt_start_heartbeat();
 #endif
         state_transition(ctx, STATE_OPERATIONAL);

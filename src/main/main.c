@@ -28,11 +28,22 @@
 #ifdef CONFIG_RPR_MODULE_INIT_SM
 #include "../init_state_machine/init_state_machine.h"
 #endif
+#include "shell_keepalive.h"
+
+#ifdef CONFIG_EXAMPLES_ENABLE_MAIN_EXAMPLES
+#include "../examples/power_supervisor.h"
+#endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 /* Track link status to trigger re-init of shell backend if needed */
 static atomic_t link_up = ATOMIC_INIT(0);
+
+/* Simple ping callback for watchdog until domain logic initializes */
+static bool early_ping_callback(void)
+{
+    return true; /* Always return true during early boot */
+}
 
 static void net_event_handler(struct net_mgmt_event_callback *cb,
                               uint32_t mgmt_event, struct net_if *iface)
@@ -106,6 +117,10 @@ static void network_startup_handler(void)
             k_sleep(K_SECONDS(1));
         }
     }
+    
+    /* Start MQTT shell keepalive to prevent 90-second timeout */
+    LOG_INF("Starting MQTT shell keepalive");
+    mqtt_shell_keepalive_start();
 #endif
 
     /* Initialize and connect main MQTT module after shell backend */
@@ -143,6 +158,12 @@ static struct k_thread network_startup_thread;
 
 int main(void)
 {
+#ifdef CONFIG_EXAMPLES_ENABLE_MAIN_EXAMPLES
+    /* Register early ping callback to prevent watchdog resets during boot */
+    supervisor_ping_register_callback(early_ping_callback);
+    LOG_INF("Registered early ping callback for watchdog");
+#endif
+
 #ifdef CONFIG_RPR_MODULE_INIT_SM
     /* Initialize and start the state machine for system startup */
     int ret = init_state_machine_init();

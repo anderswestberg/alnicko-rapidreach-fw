@@ -1,0 +1,56 @@
+SERIAL DEBUG CHECKLIST
+======================
+
+Connect: sudo picocom -b 115200 /dev/ttyACM0
+Exit: Ctrl-A, Ctrl-X
+
+WHAT TO LOOK FOR:
+-----------------
+
+1. Boot Success:
+   ✓ "*** Booting Zephyr OS build v4.0.0 ***"
+   ✓ "Device ID detected: 313938..."
+
+2. Network Connection:
+   ✓ "net_dhcpv4: Received: 192.168.2.X"
+   ✓ "init_sm: Network connected event received"
+
+3. State Machine Progress:
+   ✓ "State transition: INIT -> WAIT_NETWORK"
+   ✓ "State transition: WAIT_NETWORK -> NETWORK_READY"
+   ✓ "State transition: NETWORK_READY -> DEVICE_REG_START"
+   ✓ "State transition: DEVICE_REG_START -> DEVICE_REG_COMPLETE"
+
+4. DEBUG Messages (KEY!):
+   ✓ "DEBUG: DEVICE_REG_COMPLETE - forcing transition to MQTT_INIT_START"
+   ✓ "DEBUG: MQTT_INIT_START reached! Event=X"
+   ✓ "DEBUG: Sending EVENT_RETRY to state machine"
+   ✓ "DEBUG: Calling mqtt_init()"
+   ✓ "DEBUG: mqtt_init() returned X"
+
+5. MQTT Success (if working):
+   ✓ "MQTT module initialized"
+   ✓ "MQTT connection initiated"
+   ✓ "State transition: MQTT_INIT_START -> MQTT_CONNECTING"
+   ✓ "State transition: MQTT_CONNECTING -> OPERATIONAL"
+
+COMMON PROBLEMS:
+----------------
+
+A. If stuck at DEVICE_REG_COMPLETE:
+   - No "DEBUG: DEVICE_REG_COMPLETE" message
+   - State machine not transitioning
+
+B. If mqtt_init() fails:
+   - Check return code in "DEBUG: mqtt_init() returned X"
+   - -22 = Invalid parameter
+   - -12 = Out of memory
+   - -107 = Network not ready
+
+C. If device reboots:
+   - Look for watchdog timeout messages
+   - Note last message before reboot
+
+SAVE THE LOG:
+-------------
+In picocom: Ctrl-A, Ctrl-L to toggle logging

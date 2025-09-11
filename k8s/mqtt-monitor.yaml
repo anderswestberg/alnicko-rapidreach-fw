@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mqtt-monitor
+  namespace: rapidreach
+spec:
+  containers:
+  - name: mqtt-monitor
+    image: eclipse-mosquitto:2
+    command: 
+      - sh
+      - -c
+      - |
+        echo "Monitoring MQTT broker for all messages..."
+        mosquitto_sub -h emqx -p 1883 -u admin -P public -t '#' -v | while read line; do
+          echo "[$(date '+%H:%M:%S')] $line"
+        done
+    resources:
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+  restartPolicy: Never

@@ -17,6 +17,7 @@ export interface MqttClientEvents {
 export class DeviceMqttClient extends EventEmitter {
   private client: MqttClient;
   private devices: Map<string, Device> = new Map();
+  private shellInitialized: Set<string> = new Set();
   private pendingCommands: Map<string, {
     resolve: (value: string) => void;
     reject: (reason: any) => void;
@@ -392,6 +393,15 @@ export class DeviceMqttClient extends EventEmitter {
           uptime: heartbeat.uptime,
           ipAddress: heartbeat.ip,
         });
+        
+        // Send initial shell command to prevent 90-second timeout
+        // The MQTT shell backend expects an initial command after connection
+        if (clientId.endsWith('-shell')) {
+          const shellTopic = `rapidreach/${clientId}/shell/in`;
+          logger.info(`Sending keepalive to shell ${clientId} on topic ${shellTopic}`);
+          // Send empty string to initialize the shell session
+          this.client.publish(shellTopic, '', { qos: 1 });
+        }
       } catch (error) {
         logger.error(`Failed to parse heartbeat from ${clientId}:`, error);
       }
@@ -406,6 +416,25 @@ export class DeviceMqttClient extends EventEmitter {
         this.updateDeviceStatus(deviceId, 'online');
       } else if (status === 'offline') {
         this.updateDeviceStatus(deviceId, 'offline');
+      }
+    }
+    
+    // Handle shell output messages - indicates shell is connected
+    if (topic.match(/^rapidreach\/.*-shell\/shell\/out$/)) {
+      const parts = topic.split('/');
+      const shellClientId = parts[1]; // e.g., "313938-shell"
+      const shellTopic = `rapidreach/${shellClientId}/shell/in`;
+      
+      // Send initial command to keep shell alive (prevent 90s timeout)
+      if (!this.shellInitialized.has(shellClientId)) {
+        logger.info(`Shell connected: ${shellClientId}, sending keepalive to ${shellTopic}`);
+        this.client.publish(shellTopic, '\n', { qos: 1 });
+        this.shellInitialized.add(shellClientId);
+        
+        // Clear after 2 hours to allow re-initialization if needed
+        setTimeout(() => {
+          this.shellInitialized.delete(shellClientId);
+        }, 2 * 60 * 60 * 1000);
       }
     }
   }

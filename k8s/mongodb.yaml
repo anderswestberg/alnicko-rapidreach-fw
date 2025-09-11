@@ -28,17 +28,17 @@ spec:
         livenessProbe:
           exec:
             command:
-            - mongo
-            - --eval
-            - "db.adminCommand('ping')"
+              - mongosh
+              - --eval
+              - "db.adminCommand('ping')"
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           exec:
             command:
-            - mongo
-            - --eval
-            - "db.adminCommand('ping')"
+              - mongosh
+              - --eval
+              - "db.adminCommand('ping')"
           initialDelaySeconds: 5
           periodSeconds: 5
       volumes:

@@ -960,9 +960,7 @@ void domain_logic_func(void)
     poweroff_register_short_push_callback(power_off_short_pressed);
 
 #ifdef CONFIG_RPR_MODULE_INIT_SM
-    // Initialize and start the initialization state machine
-    init_state_machine_init();
-    init_state_machine_start();
+    // State machine is already initialized in main(), just wait for it
     
     // Wait for system to become operational
     LOG_INF("Waiting for system initialization...");
