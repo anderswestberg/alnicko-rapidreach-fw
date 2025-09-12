@@ -392,6 +392,7 @@ export class DeviceMqttClient extends EventEmitter {
           firmwareVersion: heartbeat.version,
           uptime: heartbeat.uptime,
           ipAddress: heartbeat.ip,
+          hwId: heartbeat.hwId,  // Hardware device ID for audio topic
         });
         
         // Send initial shell command to prevent 90-second timeout
@@ -484,6 +485,7 @@ export class DeviceMqttClient extends EventEmitter {
       firmwareVersion?: string;
       uptime?: number;
       ipAddress?: string;
+      hwId?: string;  // Hardware device ID
     }
   ): void {
     let device = this.devices.get(deviceId);

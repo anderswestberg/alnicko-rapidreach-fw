@@ -148,6 +148,8 @@ static size_t append_json_item(char *buf, size_t buf_size, const struct mqtt_log
 			
 			if (valid_rtc) {
 				/* RTC is available and has valid time, convert to Unix timestamp */
+				/* The RTC module returns 1-indexed months but mktime expects 0-indexed */
+				current_time.tm_mon -= 1;
 				time_t current_unix = mktime((struct tm *)&current_time);
 				if (current_unix != (time_t)-1) {
 					/* Convert to milliseconds and subtract uptime to get boot time */

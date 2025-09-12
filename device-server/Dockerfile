@@ -19,8 +19,8 @@ RUN npm run build
 # Runtime stage
 FROM node:20-alpine
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init for proper signal handling and ffmpeg for audio conversion
+RUN apk add --no-cache dumb-init ffmpeg
 
 # Create app directory
 WORKDIR /app

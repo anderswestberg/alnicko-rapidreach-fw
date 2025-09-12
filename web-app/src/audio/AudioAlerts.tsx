@@ -134,7 +134,8 @@ export const AudioAlerts = () => {
       }
 
       // const result = await response.json(); // Unused, commented out
-      notify(`Audio alert sent to ${selectedDevice}`, { type: 'success' });
+      const deviceName = devices.find(d => (d.clientId || d.id) === selectedDevice)?.clientId || selectedDevice;
+      notify(`Audio alert sent to ${deviceName}`, { type: 'success' });
       
       // Reset form
       setSelectedFile(null);
@@ -172,7 +173,7 @@ export const AudioAlerts = () => {
                   label="Select Device"
                 >
                   {devices.map((device) => (
-                    <MenuItem key={device.id} value={device.id}>
+                    <MenuItem key={device.id} value={device.clientId || device.id}>
                       {device.clientId || device.id} - {device.type} ({device.status || 'unknown'})
                     </MenuItem>
                   ))}

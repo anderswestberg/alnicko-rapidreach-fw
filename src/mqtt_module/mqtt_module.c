@@ -29,8 +29,8 @@ LOG_MODULE_REGISTER(mqtt_module, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 /* MQTT client instance */
 static struct mqtt_client client;
 static struct sockaddr_storage broker;
-static uint8_t rx_buffer[128];
-static uint8_t tx_buffer[128];
+static uint8_t rx_buffer[4096];   /* 4KB for receiving - audio will be chunked */
+static uint8_t tx_buffer[1024];   /* 1KB for sending (heartbeats, etc) */
 static char client_id_buffer[32];  /* Buffer for "rr-speaker-XXXXX" format */
 
 /* Heartbeat task control */
@@ -42,7 +42,7 @@ static bool mqtt_initialized = false;
 /* MQTT maintenance thread */
 static struct k_thread mqtt_thread;
 static k_tid_t mqtt_thread_id;
-static K_THREAD_STACK_DEFINE(mqtt_thread_stack, 2048);
+static K_THREAD_STACK_DEFINE(mqtt_thread_stack, 8192);
 static bool mqtt_thread_running = false;
 
 /* Auto-reconnection state */
@@ -665,10 +665,12 @@ mqtt_status_t mqtt_send_heartbeat(void)
     }
 
     /* Create heartbeat payload with device info */
+    size_t hw_id_len;
+    const char *hw_device_id = dev_info_get_device_id_str(&hw_id_len);
     ret = snprintf(payload, sizeof(payload), 
-                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu,\"deviceId\":\"%s\",\"version\":\"%s\"}",
+                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu,\"deviceId\":\"%s\",\"hwId\":\"%s\",\"version\":\"%s\"}",
                    sequence_number++, k_uptime_get() / 1000, /* Convert to seconds */
-                   client_id_buffer, "1.0.0");
+                   client_id_buffer, hw_device_id ? hw_device_id : "", "1.0.0");
     
     if (ret < 0 || ret >= sizeof(payload)) {
         LOG_ERR("Failed to create heartbeat payload");

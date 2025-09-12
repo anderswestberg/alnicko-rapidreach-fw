@@ -6,7 +6,7 @@ import multer from 'multer';
 import { promises as fs } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-// import path from 'path'; // Not used, commented out to fix TS error
+import path from 'path';
 import { randomUUID } from 'crypto';
 
 const execAsync = promisify(exec);
@@ -141,6 +141,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       // -application voip: Optimize for speech (use 'audio' for music)
       // -ac 1: Convert to mono (saves bandwidth)
       // -ar 16000: Sample rate (16kHz is good for speech, use 48000 for music)
+      // Convert to Opus format - now using HTTP download, so we can use better quality
       const ffmpegCommand = `ffmpeg -i "${req.file.path}" -c:a libopus -b:a 32k -vbr on -compression_level 10 -application voip -ac 1 -ar 16000 -f opus "${outputPath}" -y`;
 
       logger.debug(`Executing: ${ffmpegCommand}`);
@@ -181,10 +182,14 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       // Combine JSON header and Opus data
       const mqttPayload = Buffer.concat([jsonBuffer, opusData]);
 
-      // Publish to device's audio topic
-      const topic = `rapidreach/audio/${deviceId}`;
+      // Use hardware ID for audio topic if available, fallback to deviceId
+      const hwId = device.metadata?.hwId;
+      const audioDeviceId = hwId || deviceId;
+      const topic = `rapidreach/audio/${audioDeviceId}`;
       
       logger.info(`Publishing audio alert to ${topic}`, {
+        deviceId,
+        hwId,
         jsonSize: jsonBuffer.length,
         opusSize: opusData.length,
         totalSize: mqttPayload.length,
@@ -322,8 +327,10 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
         opusData,
       ]);
 
-      // Publish
-      const topic = `rapidreach/audio/${deviceId}`;
+      // Use hardware ID for audio topic if available, fallback to deviceId
+      const hwId = device.metadata?.hwId;
+      const audioDeviceId = hwId || deviceId;
+      const topic = `rapidreach/audio/${audioDeviceId}`;
       await mqttClient.publish(topic, mqttPayload);
 
       return res.json({
@@ -384,6 +391,45 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
         ],
       },
     });
+  });
+
+  // Download endpoint for audio files
+  router.get('/download/:audioId', async (req, res) => {
+    try {
+      const { audioId } = req.params;
+      const audioPath = path.join('/tmp/audio-cache', `${audioId}.opus`);
+      
+      // Check if file exists
+      try {
+        await fs.access(audioPath);
+      } catch {
+        return res.status(404).json({
+          success: false,
+          error: 'Audio file not found',
+        });
+      }
+      
+      // Send the audio file
+      res.setHeader('Content-Type', 'audio/opus');
+      res.setHeader('Content-Disposition', `attachment; filename="${audioId}.opus"`);
+      res.sendFile(audioPath);
+      
+      // Clean up old files after 5 minutes
+      setTimeout(async () => {
+        try {
+          await fs.unlink(audioPath);
+        } catch {
+          // Ignore errors
+        }
+      }, 5 * 60 * 1000);
+      
+    } catch (error) {
+      logger.error('Error serving audio file:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to serve audio file',
+      });
+    }
   });
 
   return router;
