@@ -123,8 +123,10 @@ static void network_startup_handler(void)
     mqtt_shell_keepalive_start();
 #endif
 
-    /* Initialize and connect main MQTT module after shell backend */
+    /* MQTT module initialization is handled by the state machine when enabled */
 #ifdef CONFIG_RPR_MODULE_MQTT
+#ifndef CONFIG_RPR_INIT_STATE_MACHINE
+    /* Only connect directly if state machine is not handling it */
     LOG_INF("Connecting MQTT client...");
     mqtt_status_t status = mqtt_module_connect();
     if (status == MQTT_SUCCESS) {
@@ -144,11 +146,14 @@ static void network_startup_handler(void)
         LOG_WRN("MQTT connection failed: %d", status);
         /* Auto-reconnect will handle retries */
     }
-#endif
+#endif /* !CONFIG_RPR_INIT_STATE_MACHINE */
+#endif /* CONFIG_RPR_MODULE_MQTT */
 
     /* Initialize MQTT log client after MQTT main connects */
 #ifdef CONFIG_RPR_MQTT_LOG_CLIENT
+#ifndef CONFIG_RPR_INIT_STATE_MACHINE
     (void)mqtt_log_client_init();
+#endif
 #endif
 }
 

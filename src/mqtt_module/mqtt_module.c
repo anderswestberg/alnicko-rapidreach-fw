@@ -50,6 +50,29 @@ static k_tid_t mqtt_thread_id;
 static K_THREAD_STACK_DEFINE(mqtt_thread_stack, 8192);
 static bool mqtt_thread_running = false;
 
+/* Audio message processing work queue */
+#define AUDIO_WORK_QUEUE_STACK_SIZE 8192
+static K_THREAD_STACK_DEFINE(audio_work_queue_stack, AUDIO_WORK_QUEUE_STACK_SIZE);
+static struct k_work_q audio_work_queue;
+static bool audio_work_queue_initialized = false;
+
+/* Work item for processing audio messages */
+struct audio_msg_work {
+    struct k_work work;
+    char topic[128];
+    bool in_use;
+    uint8_t json_header[512];  /* Small buffer just for JSON header */
+    size_t json_len;
+    const char *temp_file;  /* Path to temporary file with audio data */
+};
+
+#define AUDIO_WORK_ITEMS 2  /* Allow 2 pending audio messages */
+
+static struct audio_msg_work audio_work_items[AUDIO_WORK_ITEMS];
+
+/* Forward declaration */
+static void process_audio_message_work(struct k_work *work);
+
 /* Auto-reconnection state */
 static bool auto_reconnect_enabled = true;
 static int64_t last_reconnect_attempt = 0;
@@ -179,10 +202,24 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         
         LOG_INF("Received PUBLISH on topic '%s' [%zu bytes]", topic_buf, total_len);
         
+        /* Send PUBACK immediately for QoS 1 messages to avoid broker timeout */
+        if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+            struct mqtt_puback_param puback = {
+                .message_id = pub->message_id
+            };
+            int ack_ret = mqtt_publish_qos1_ack(client, &puback);
+            if (ack_ret < 0) {
+                LOG_ERR("Failed to send PUBACK: %d", ack_ret);
+            } else {
+                LOG_DBG("PUBACK sent for message ID %u", pub->message_id);
+            }
+        }
+        
         /* Check if this is a potentially large audio message */
         if (strstr(topic_buf, "rapidreach/audio/") != NULL && total_len > 256) {
-            /* Handle large audio message with chunked reading */
+            /* Handle large audio message - read and save in MQTT thread with frequent yields */
             LOG_INF("Processing large audio message (%zu bytes)", total_len);
+            LOG_INF("MQTT connected status before file write: %d", mqtt_connected);
             
             /* First, read up to 512 bytes to get the JSON header */
             uint8_t json_buf[512];
@@ -193,14 +230,39 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 break;
             }
             
-            /* Find the end of JSON (look for the last '}') */
+            /* Find the end of JSON using proper brace counting */
             int json_end = -1;
-            for (int i = json_read - 1; i >= 0; i--) {
-                if (json_buf[i] == '}') {
-                    json_end = i + 1;
-                    /* Make sure this is the end of the JSON by checking for audio data */
-                    if (json_end < json_read && json_buf[json_end] != '{') {
-                        break;
+            int brace_count = 0;
+            bool in_string = false;
+            bool escape_next = false;
+            
+            for (int i = 0; i < json_read; i++) {
+                char c = json_buf[i];
+                
+                if (escape_next) {
+                    escape_next = false;
+                    continue;
+                }
+                
+                if (c == '\\' && in_string) {
+                    escape_next = true;
+                    continue;
+                }
+                
+                if (c == '"' && !escape_next) {
+                    in_string = !in_string;
+                    continue;
+                }
+                
+                if (!in_string) {
+                    if (c == '{') {
+                        brace_count++;
+                    } else if (c == '}') {
+                        brace_count--;
+                        if (brace_count == 0) {
+                            json_end = i + 1;
+                            break;
+                        }
                     }
                 }
             }
@@ -220,8 +282,12 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             
             LOG_INF("JSON header is %d bytes, audio starts at byte %d", json_end, json_end);
             
+            /* Yield to let MQTT thread process any pending packets before file write */
+            k_yield();
+            k_sleep(K_MSEC(5));
+            
 #ifdef CONFIG_RPR_MODULE_FILE_MANAGER
-            /* Save audio data to file */
+            /* Save audio data to file with frequent yields */
             const char *audio_file = "/lfs/mqtt_audio_temp.opus";
             struct fs_file_t file;
             fs_file_t_init(&file);
@@ -230,7 +296,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             ret = file_manager_init();
             if (ret < 0 && ret != -EALREADY) {
                 LOG_ERR("Failed to initialize file manager: %d", ret);
-                /* Consume the rest of the message */
+                /* Consume the rest */
                 uint8_t discard[256];
                 size_t remaining = total_len - json_read;
                 while (remaining > 0) {
@@ -241,7 +307,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 break;
             }
             
-            /* Calculate how much audio data we already have in json_buf */
+            /* Calculate audio data position and size */
             size_t audio_in_buf = json_read - json_end;
             size_t audio_remaining = total_len - json_end;
             
@@ -278,10 +344,20 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 }
                 written = ret;
                 audio_remaining -= audio_in_buf;
+                
+                /* Note: Cannot call mqtt_input/mqtt_live while reading payload */
             }
             
-            /* Read and write the rest of the audio data in chunks */
-            uint8_t chunk_buf[512];
+            /* Read and write the rest in smaller chunks with more frequent yields */
+            /* NOTE: We cannot call mqtt_input/mqtt_live while reading the payload
+             * because the socket is busy with mqtt_read_publish_payload_blocking.
+             * This means MQTT packets (including keepalives) cannot be processed
+             * during the ~1.3 second file write operation. The 60-second keepalive
+             * timeout should be sufficient to handle this delay. */
+            uint8_t chunk_buf[64];  /* Very small chunks for maximum responsiveness */
+            int chunk_count = 0;
+            int64_t start_time = k_uptime_get();
+            LOG_INF("Starting file write at time: %lld", start_time);
             
             while (audio_remaining > 0) {
                 size_t chunk = (audio_remaining < sizeof(chunk_buf)) ? audio_remaining : sizeof(chunk_buf);
@@ -302,26 +378,83 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 
                 written += ret;
                 audio_remaining -= chunk;
-                LOG_DBG("Wrote %d bytes, %zu remaining", ret, audio_remaining);
+                
+                /* Cannot call mqtt_input/mqtt_live while reading publish payload */
+                /* The socket is busy with mqtt_read_publish_payload_blocking */
+                
+                /* Yield after every chunk (64 bytes) for maximum responsiveness */
+                k_yield();
+                
+                /* Log progress periodically */
+                int64_t now = k_uptime_get();
+                if ((now - start_time) > 1000 && chunk_count % 50 == 0) {
+            LOG_INF("File write progress: %zu bytes written, %zu remaining (elapsed: %lld ms)", 
+                    written, audio_remaining, (now - start_time));
+                }
             }
             
             fs_close(&file);
-            LOG_INF("Audio saved to %s (%zu bytes)", audio_file, written);
+            int64_t end_time = k_uptime_get();
+            LOG_INF("Audio saved to %s (%zu bytes) at time: %lld (duration: %lld ms)", 
+                    audio_file, written, end_time, (end_time - start_time));
             
-            /* Call handler with JSON metadata only */
-            k_mutex_lock(&subscriptions_mutex, K_FOREVER);
-            for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
-                if (subscriptions[i].active && 
-                    strcmp(subscriptions[i].topic, topic_buf) == 0) {
-                    if (subscriptions[i].handler) {
-                        /* Pass only the JSON part, null-terminated */
-                        json_buf[json_end] = '\0';
-                        subscriptions[i].handler(topic_buf, json_buf, json_end);
-                    }
+            /* Give the MQTT thread time to process after the long blocking operation */
+            k_yield();
+            k_sleep(K_MSEC(10));  /* Brief delay to let MQTT thread catch up */
+            
+            /* Queue work item for handler call */
+            struct audio_msg_work *work_item = NULL;
+            for (int i = 0; i < AUDIO_WORK_ITEMS; i++) {
+                if (!audio_work_items[i].in_use) {
+                    work_item = &audio_work_items[i];
+                    work_item->in_use = true;
                     break;
                 }
             }
-            k_mutex_unlock(&subscriptions_mutex);
+            
+            if (work_item) {
+                /* Copy JSON header */
+                memcpy(work_item->json_header, json_buf, json_end);
+                work_item->json_len = json_end;
+                strncpy(work_item->topic, topic_buf, sizeof(work_item->topic) - 1);
+                work_item->topic[sizeof(work_item->topic) - 1] = '\0';
+                work_item->temp_file = audio_file;
+                
+                /* Submit to work queue */
+                ret = k_work_submit_to_queue(&audio_work_queue, &work_item->work);
+                if (ret < 0) {
+                    LOG_ERR("Failed to submit audio work: %d", ret);
+                    work_item->in_use = false;
+                    /* Call handler directly */
+                    k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+                    for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+                        if (subscriptions[i].active && 
+                            strcmp(subscriptions[i].topic, topic_buf) == 0) {
+                            if (subscriptions[i].handler) {
+                                json_buf[json_end] = '\0';
+                                subscriptions[i].handler(topic_buf, json_buf, json_end);
+                            }
+                            break;
+                        }
+                    }
+                    k_mutex_unlock(&subscriptions_mutex);
+                }
+            } else {
+                LOG_ERR("No available work items, calling handler directly");
+                /* Call handler directly */
+                k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+                for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+                    if (subscriptions[i].active && 
+                        strcmp(subscriptions[i].topic, topic_buf) == 0) {
+                        if (subscriptions[i].handler) {
+                            json_buf[json_end] = '\0';
+                            subscriptions[i].handler(topic_buf, json_buf, json_end);
+                        }
+                        break;
+                    }
+                }
+                k_mutex_unlock(&subscriptions_mutex);
+            }
 #else
             LOG_ERR("File manager not available for audio storage");
             /* Consume the rest of the message */
@@ -367,13 +500,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             k_mutex_unlock(&subscriptions_mutex);
         }
         
-        /* Send PUBACK for QoS 1 */
-        if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
-            struct mqtt_puback_param puback = {
-                .message_id = pub->message_id
-            };
-            mqtt_publish_qos1_ack(client, &puback);
-        }
+        /* PUBACK already sent at the beginning of message processing */
         break;
     }
 
@@ -409,6 +536,20 @@ static int mqtt_internal_connect(void)
     if (mqtt_connected) {
         return 0; /* Already connected */
     }
+    
+    /* Clean up any previous connection state */
+    if (client.transport.tcp.sock >= 0) {
+        LOG_INF("Cleaning up previous socket (fd=%d) before reconnect", client.transport.tcp.sock);
+        mqtt_disconnect(&client);
+        k_sleep(K_MSEC(50)); /* Brief delay for cleanup */
+        
+        /* Re-initialize the client structure */
+        ret = prepare_mqtt_client();
+        if (ret != 0) {
+            LOG_ERR("Failed to re-prepare MQTT client: %d", ret);
+            return ret;
+        }
+    }
 
     LOG_INF("Attempting MQTT connection to %s:%d...", 
             CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
@@ -440,13 +581,31 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
             ret = mqtt_input(&client);
             if (ret < 0) {
                 if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EPIPE) {
-                    LOG_ERR("MQTT connection lost: %d", ret);
+                    LOG_ERR("MQTT connection lost in mqtt_input: %d (time: %lld)", ret, current_time);
+                    LOG_ERR("Connection lost reason: ENOTCONN=%d, ECONNRESET=%d, EPIPE=%d", 
+                            (ret == -ENOTCONN), (ret == -ECONNRESET), (ret == -EPIPE));
                     mqtt_connected = false;
                     last_reconnect_attempt = current_time;
+                    
+                    /* Mark socket as invalid to force cleanup on reconnect */
+                    client.transport.tcp.sock = -1;
+                    
+                    /* Notify about disconnection */
+                    if (event_handler) {
+                        event_handler(MQTT_EVENT_DISCONNECTED);
+                    }
                 } else if (ret == -EBUSY) {
                     LOG_DBG("MQTT socket busy (disconnected): %d", ret);
                     mqtt_connected = false;
                     last_reconnect_attempt = current_time;
+                    
+                    /* Mark socket as invalid to force cleanup on reconnect */
+                    client.transport.tcp.sock = -1;
+                    
+                    /* Notify about disconnection */
+                    if (event_handler) {
+                        event_handler(MQTT_EVENT_DISCONNECTED);
+                    }
                 } else if (ret != -EAGAIN && ret != -EWOULDBLOCK) {
                     LOG_DBG("MQTT input error (non-fatal): %d", ret);
                     /* Don't immediately disconnect on other errors */
@@ -455,12 +614,29 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
             
             /* Keep connection alive only if still connected */
             if (mqtt_connected) {
+                static int64_t last_live_log = 0;
+                int64_t now = k_uptime_get();
+                if (now - last_live_log > 5000) {  /* Log every 5 seconds */
+                    LOG_DBG("Calling mqtt_live()");
+                    last_live_log = now;
+                }
+                
                 ret = mqtt_live(&client);
                 if (ret < 0 && ret != -EAGAIN) {
                     if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EPIPE || ret == -EBUSY) {
-                        LOG_ERR("MQTT connection lost during live: %d", ret);
+                        LOG_ERR("MQTT connection lost during live: %d (time: %lld)", ret, current_time);
+                        LOG_ERR("Live error: ENOTCONN=%d, ECONNRESET=%d, EPIPE=%d, EBUSY=%d",
+                                (ret == -ENOTCONN), (ret == -ECONNRESET), (ret == -EPIPE), (ret == -EBUSY));
                         mqtt_connected = false;
                         last_reconnect_attempt = current_time;
+                        
+                        /* Mark socket as invalid to force cleanup on reconnect */
+                        client.transport.tcp.sock = -1;
+                        
+                        /* Notify about disconnection */
+                        if (event_handler) {
+                            event_handler(MQTT_EVENT_DISCONNECTED);
+                        }
                     } else {
                         LOG_DBG("MQTT live error (non-fatal): %d", ret);
                     }
@@ -495,7 +671,7 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
         }
         
         /* Sleep for a short time to avoid busy waiting */
-        k_sleep(K_MSEC(100));
+        k_sleep(K_MSEC(50));  /* Reduced from 100ms for better responsiveness */
     }
     
     LOG_INF("MQTT maintenance thread stopped");
@@ -648,6 +824,82 @@ static int prepare_mqtt_client(void)
     return 0;
 }
 
+/**
+ * @brief Process audio message in work queue (not MQTT thread)
+ */
+static void process_audio_message_work(struct k_work *work)
+{
+    struct audio_msg_work *audio_work = CONTAINER_OF(work, struct audio_msg_work, work);
+    int json_end = -1;
+    
+    LOG_INF("Processing audio message in work queue: topic='%s', json_len=%zu", 
+            audio_work->topic, audio_work->json_len);
+    
+    /* Parse the JSON header to find boundary */
+    int brace_count = 0;
+    bool in_string = false;
+    bool escape_next = false;
+    
+    for (size_t i = 0; i < audio_work->json_len; i++) {
+        char c = audio_work->json_header[i];
+        
+        if (escape_next) {
+            escape_next = false;
+            continue;
+        }
+        
+        if (c == '\\' && in_string) {
+            escape_next = true;
+            continue;
+        }
+        
+        if (c == '"' && !escape_next) {
+            in_string = !in_string;
+            continue;
+        }
+        
+        if (!in_string) {
+            if (c == '{') {
+                brace_count++;
+            } else if (c == '}') {
+                brace_count--;
+                if (brace_count == 0) {
+                    json_end = i + 1;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (json_end < 0) {
+        LOG_ERR("Could not find JSON boundary in header");
+        goto cleanup;
+    }
+    
+    LOG_INF("JSON is %d bytes", json_end);
+    
+    /* Call handler with JSON metadata only */
+    k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+    for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+        if (subscriptions[i].active && 
+            strcmp(subscriptions[i].topic, audio_work->topic) == 0) {
+            if (subscriptions[i].handler) {
+                /* Null-terminate JSON and call handler */
+                audio_work->json_header[json_end] = '\0';
+                subscriptions[i].handler(audio_work->topic, audio_work->json_header, json_end);
+            }
+            break;
+        }
+    }
+    k_mutex_unlock(&subscriptions_mutex);
+    
+    LOG_INF("Audio message handler called, file: %s", audio_work->temp_file);
+
+cleanup:
+    /* Mark work item as available */
+    audio_work->in_use = false;
+}
+
 int mqtt_init(void)
 {
     int ret;
@@ -672,6 +924,24 @@ int mqtt_init(void)
     /* Initialize subscriptions */
     k_mutex_init(&subscriptions_mutex);
     memset(subscriptions, 0, sizeof(subscriptions));
+    
+    /* Initialize audio work queue */
+    if (!audio_work_queue_initialized) {
+        k_work_queue_init(&audio_work_queue);
+        k_work_queue_start(&audio_work_queue, audio_work_queue_stack,
+                          K_THREAD_STACK_SIZEOF(audio_work_queue_stack),
+                          K_PRIO_PREEMPT(10), NULL);
+        k_thread_name_set(&audio_work_queue.thread, "audio_work_queue");
+        
+        /* Initialize work items */
+        for (int i = 0; i < AUDIO_WORK_ITEMS; i++) {
+            k_work_init(&audio_work_items[i].work, process_audio_message_work);
+            audio_work_items[i].in_use = false;
+        }
+        
+        audio_work_queue_initialized = true;
+        LOG_INF("Audio work queue initialized");
+    }
 
     /* Start MQTT maintenance thread */
     mqtt_thread_running = true;

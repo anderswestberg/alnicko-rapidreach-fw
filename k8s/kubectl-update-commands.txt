@@ -1,0 +1,23 @@
+# K3s Update Commands for RapidReach
+# Run these commands on the k3s host (192.168.2.79)
+
+# 1. Update device-server to v1.0.25
+kubectl set image deployment/device-server device-server=enerahub/device-server:v1.0.25 -n rapidreach
+
+# 2. Update web-app to v1.0.25
+kubectl set image deployment/web-app web-app=enerahub/web-app:v1.0.25 -n rapidreach
+
+# 3. Check rollout status
+kubectl rollout status deployment/device-server -n rapidreach
+kubectl rollout status deployment/web-app -n rapidreach
+
+# 4. Verify pods are running
+kubectl get pods -n rapidreach
+
+# 5. Check deployment details
+kubectl describe deployment device-server -n rapidreach | grep Image
+kubectl describe deployment web-app -n rapidreach | grep Image
+
+# Alternative: Force restart if needed
+# kubectl rollout restart deployment/device-server -n rapidreach
+# kubectl rollout restart deployment/web-app -n rapidreach

@@ -35,12 +35,14 @@ fi
 
 # Create production Dockerfile
 cat > Dockerfile.prod << 'EOF'
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# Copy .npmrc if it exists for private registry authentication
+COPY .npmrc* ./
+RUN npm ci --legacy-peer-deps
 COPY . .
-ARG VITE_API_URL=http://192.168.2.62:30002/api
+ARG VITE_API_URL=http://192.168.2.79:30002/api
 ARG VITE_API_KEY=dev-api-key-12345
 RUN npm run build
 

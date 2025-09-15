@@ -44,7 +44,7 @@ export const AudioAlerts = () => {
   const [devices, setDevices] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [priority, setPriority] = useState(5);
-  const [volume, setVolume] = useState(80);
+  const [volume, setVolume] = useState(25);
   const [playCount, setPlayCount] = useState(1);
   const [interruptCurrent, setInterruptCurrent] = useState(false);
   const [saveToFile, setSaveToFile] = useState(false);

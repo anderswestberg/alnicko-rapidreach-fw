@@ -16,11 +16,9 @@ LOG_MODULE_REGISTER(mqtt_parser, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 static const struct json_obj_descr metadata_descr[] = {
     JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, opus_data_size, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, priority, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, save_to_file, JSON_TOK_TRUE),
     JSON_OBJ_DESCR_ARRAY(mqtt_message_metadata_t, filename, 64, filename, JSON_TOK_STRING),
     JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, play_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, volume, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, interrupt_current, JSON_TOK_TRUE),
 };
 
 int mqtt_parse_message(const uint8_t *payload, size_t payload_len, 
@@ -71,6 +69,15 @@ int mqtt_parse_message(const uint8_t *payload, size_t payload_len,
     size_t remaining_len = payload_len - opus_offset;
     
     if (remaining_len < parsed_msg->metadata.opus_data_size) {
+        /* This might be a file-based audio message where opus data is stored separately */
+        if (remaining_len == 0 && parsed_msg->metadata.opus_data_size > 0) {
+            LOG_WRN("No opus data in payload, expected %u bytes (likely stored in file)",
+                    parsed_msg->metadata.opus_data_size);
+            parsed_msg->opus_data = NULL;
+            parsed_msg->opus_data_len = 0;
+            parsed_msg->valid = true;
+            return MQTT_PARSER_SUCCESS;
+        }
         LOG_ERR("Opus data size mismatch: expected %u, available %zu",
                 parsed_msg->metadata.opus_data_size, remaining_len);
         return MQTT_PARSER_ERR_SIZE_MISMATCH;
@@ -157,7 +164,7 @@ int mqtt_parse_json_metadata(const char *json_str,
     memset(metadata, 0, sizeof(mqtt_message_metadata_t));
     metadata->priority = 5;        /* Default medium priority */
     metadata->play_count = 1;      /* Play once by default */
-    metadata->volume = 80;         /* 80% volume by default */
+    metadata->volume = 40;         /* 40% volume by default */
     metadata->interrupt_current = false;
     metadata->save_to_file = false;
     
@@ -175,6 +182,29 @@ int mqtt_parse_json_metadata(const char *json_str,
             size_str = strchr(size_str, ':');
             if (size_str) {
                 metadata->opus_data_size = strtoul(size_str + 1, NULL, 10);
+            }
+        }
+        
+        /* Parse boolean fields manually */
+        char *save_str = strstr(json_str, "\"save_to_file\"");
+        if (save_str) {
+            save_str = strchr(save_str, ':');
+            if (save_str) {
+                /* Skip whitespace */
+                save_str++;
+                while (*save_str == ' ') save_str++;
+                metadata->save_to_file = (strncmp(save_str, "true", 4) == 0);
+            }
+        }
+        
+        char *interrupt_str = strstr(json_str, "\"interrupt_current\"");
+        if (interrupt_str) {
+            interrupt_str = strchr(interrupt_str, ':');
+            if (interrupt_str) {
+                /* Skip whitespace */
+                interrupt_str++;
+                while (*interrupt_str == ' ') interrupt_str++;
+                metadata->interrupt_current = (strncmp(interrupt_str, "true", 4) == 0);
             }
         }
         

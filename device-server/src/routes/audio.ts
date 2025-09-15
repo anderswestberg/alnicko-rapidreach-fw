@@ -40,14 +40,28 @@ const upload = multer({
   },
 });
 
-// Request validation schemas
+// Request validation schemas (accept string numerics; make volume required, no default)
+const numberFromString = (schema: z.ZodNumber, fallback?: number) =>
+  z.preprocess((v) => {
+    if (typeof v === 'string' && v.trim() !== '') return Number(v);
+    if (typeof v === 'number') return v;
+    return fallback !== undefined ? fallback : v;
+  }, schema);
+
+const booleanFromString = (schema: z.ZodBoolean, fallback?: boolean) =>
+  z.preprocess((v) => {
+    if (typeof v === 'string') return v === 'true';
+    if (typeof v === 'boolean') return v;
+    return fallback !== undefined ? fallback : v;
+  }, schema);
+
 const audioAlertSchema = z.object({
   deviceId: z.string().min(1),
-  priority: z.number().min(0).max(255).default(5),
-  volume: z.number().min(0).max(100).default(80),
-  playCount: z.number().min(0).default(1),
-  interruptCurrent: z.boolean().default(false),
-  saveToFile: z.boolean().default(false),
+  priority: numberFromString(z.number().min(0).max(255), 5).default(5),
+  volume: numberFromString(z.number().min(0).max(100), 25).default(25),
+  playCount: numberFromString(z.number().min(0), 1).default(1),
+  interruptCurrent: booleanFromString(z.boolean(), false).default(false),
+  saveToFile: booleanFromString(z.boolean(), false).default(false),
   filename: z.string().optional(),
 });
 
@@ -71,22 +85,14 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
 
       tempFiles.push(req.file.path);
 
-      // Parse metadata from JSON
-      let parsedMetadata;
-      try {
-        parsedMetadata = req.body.metadata ? JSON.parse(req.body.metadata) : req.body;
-      } catch (error) {
-        // Fallback to direct body parsing for backward compatibility
-        parsedMetadata = {
-          deviceId: req.body.deviceId,
-          priority: req.body.priority ? parseInt(req.body.priority, 10) : undefined,
-          volume: req.body.volume ? parseInt(req.body.volume, 10) : undefined,
-          playCount: req.body.playCount ? parseInt(req.body.playCount, 10) : undefined,
-          interruptCurrent: req.body.interruptCurrent === 'true',
-          saveToFile: req.body.saveToFile === 'true',
-          filename: req.body.filename,
-        };
-      }
+      // Parse metadata from JSON or form-data; numeric/boolean strings handled by schema
+      const parsedMetadata = (() => {
+        try {
+          return req.body.metadata ? JSON.parse(req.body.metadata) : req.body;
+        } catch {
+          return req.body;
+        }
+      })();
 
       // Parse and validate request body
       const validation = audioAlertSchema.safeParse(parsedMetadata);
@@ -262,22 +268,14 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
         });
       }
 
-      // Parse metadata from JSON
-      let parsedMetadata;
-      try {
-        parsedMetadata = req.body.metadata ? JSON.parse(req.body.metadata) : req.body;
-      } catch (error) {
-        // Fallback to direct body parsing for backward compatibility
-        parsedMetadata = {
-          deviceId: req.body.deviceId,
-          priority: req.body.priority ? parseInt(req.body.priority, 10) : undefined,
-          volume: req.body.volume ? parseInt(req.body.volume, 10) : undefined,
-          playCount: req.body.playCount ? parseInt(req.body.playCount, 10) : undefined,
-          interruptCurrent: req.body.interruptCurrent === 'true',
-          saveToFile: req.body.saveToFile === 'true',
-          filename: req.body.filename,
-        };
-      }
+      // Parse metadata from JSON or form-data; numeric/boolean strings handled by schema
+      const parsedMetadata = (() => {
+        try {
+          return req.body.metadata ? JSON.parse(req.body.metadata) : req.body;
+        } catch {
+          return req.body;
+        }
+      })();
 
       const validation = audioAlertSchema.safeParse(parsedMetadata);
       if (!validation.success) {

@@ -635,6 +635,10 @@ static void state_operational_handler(init_sm_context_t *ctx, init_event_t event
         ctx->mqtt_connected = false;
         state_transition(ctx, STATE_MQTT_INIT_START);
         break;
+    case EVENT_MQTT_CONNECTED:
+        /* Already operational, ignore duplicate connected events */
+        LOG_DBG("Ignoring MQTT connected event in OPERATIONAL state (already connected)");
+        break;
     default:
         LOG_DBG("Event %d in OPERATIONAL state", event);
         break;

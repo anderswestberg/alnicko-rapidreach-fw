@@ -42,32 +42,26 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
     const char *temp_audio_file = "/lfs/mqtt_audio_temp.opus";
     bool audio_in_file = false;
     
-    LOG_INF("Received audio alert on topic '%s' (%zu bytes)", topic, payload_len);
-    
-    /* Check if this is just JSON metadata (audio in file) */
-    if (payload_len < 256 && file_manager_exists(temp_audio_file) == 1) {
-        /* Large audio message was saved to file, we only have JSON */
-        audio_in_file = true;
-        LOG_INF("Audio data is in file %s", temp_audio_file);
-    }
+    LOG_INF("Processing audio alert on topic '%s' (%zu bytes)", topic, payload_len);
     
     /* Parse the MQTT message */
     ret = mqtt_parse_message(payload, payload_len, &parsed_msg);
-    if (ret == MQTT_PARSER_ERR_SIZE_MISMATCH && audio_in_file) {
-        /* Expected - we only have JSON, audio is in file */
-        LOG_INF("JSON parsed, audio data size: %zu", parsed_msg.metadata.opus_data_size);
-    } else if (ret != MQTT_PARSER_SUCCESS) {
+    if (ret != MQTT_PARSER_SUCCESS) {
         LOG_ERR("Failed to parse MQTT audio message: %s", 
                 mqtt_parser_error_string(ret));
-        if (audio_in_file) {
-            file_manager_delete(temp_audio_file);
-        }
         return;
     }
     
-    LOG_INF("Parsed audio: priority=%d, size=%zu, play_count=%d, volume=%d",
+    /* Check if audio data was parsed from payload or is in file */
+    if (parsed_msg.opus_data_len == 0 && parsed_msg.metadata.opus_data_size > 0) {
+        /* Audio data is in file (MQTT module saved it) */
+        audio_in_file = true;
+        LOG_INF("Audio data stored in file %s, JSON metadata parsed successfully", temp_audio_file);
+    }
+    
+    LOG_INF("Parsed audio: priority=%d, size=%u, play_count=%d, volume=%d",
             parsed_msg.metadata.priority,
-            parsed_msg.opus_data_len,
+            parsed_msg.metadata.opus_data_size,
             parsed_msg.metadata.play_count,
             parsed_msg.metadata.volume);
     
@@ -103,21 +97,16 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                 LOG_INF("Saved audio to '%s'", filepath);
             }
             
-            /* Play from saved file */
-            for (uint32_t i = 0; i < parsed_msg.metadata.play_count || parsed_msg.metadata.play_count == 0; i++) {
-                ret = audio_player_start(filepath);
-                if (ret != PLAYER_OK) {
-                    LOG_ERR("Failed to start audio playback: %d", ret);
-                    break;
-                }
-                
-                /* Wait for playback to complete - TODO: implement proper check */
-                k_msleep(3000); /* Assume 3 seconds playback time */
-                
-                /* Break if infinite loop and stop requested */
-                if (parsed_msg.metadata.play_count == 0) {
-                    /* TODO: Check for stop condition */
-                    break;
+            /* Start playback (non-blocking) */
+            ret = audio_player_start(filepath);
+            if (ret != PLAYER_OK) {
+                LOG_ERR("Failed to start audio playback: %d", ret);
+            } else {
+                LOG_INF("Audio playback started from '%s'", filepath);
+                /* TODO: Handle play_count > 1 and infinite playback in audio player */
+                if (parsed_msg.metadata.play_count != 1) {
+                    LOG_WRN("play_count=%d not yet supported, playing once", 
+                            parsed_msg.metadata.play_count);
                 }
             }
         } else {
@@ -135,7 +124,7 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
             
             /* Set volume if supported */
             if (parsed_msg.metadata.volume <= 100) {
-#if defined(CONFIG_DT_HAS_TI_TAS6422DAC_ENABLED)
+#if DT_NODE_HAS_COMPAT(DT_NODELABEL(audio_codec), ti_tas6422dac)
                 /* Map 0-100% to TAS6422DAC range (-200 to +48 in 0.5 dB steps)
                  * Web volume:  Codec value:  dB:
                  * 0%          -200          -100 dB (mute)
@@ -156,6 +145,12 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                 }
                 LOG_INF("Mapping web volume %d%% to codec value %d", 
                         parsed_msg.metadata.volume, codec_volume);
+                if (codec_volume < MINIMUM_CODEC_VOLUME) {
+                    codec_volume = MINIMUM_CODEC_VOLUME;
+                }
+                if (codec_volume > MAXIMUM_CODEC_VOLUME) {
+                    codec_volume = MAXIMUM_CODEC_VOLUME;
+                }
                 ret = audio_player_set_volume(codec_volume);
 #else
                 /* For other codecs, pass volume directly */
@@ -166,30 +161,23 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                 }
             }
             
-            /* Play the audio */
-            for (uint32_t i = 0; i < parsed_msg.metadata.play_count || parsed_msg.metadata.play_count == 0; i++) {
-                ret = audio_player_start(play_file);
-                if (ret != PLAYER_OK) {
-                    LOG_ERR("Failed to start audio playback: %d", ret);
-                    break;
-                }
-                
-                /* Wait for playback to complete - TODO: implement proper check */
-                k_msleep(3000); /* Assume 3 seconds playback time */
-                
-                /* Break if infinite loop and stop requested */
-                if (parsed_msg.metadata.play_count == 0) {
-                    /* TODO: Check for stop condition */
-                    break;
+            /* Start playback (non-blocking) */
+            ret = audio_player_start(play_file);
+            if (ret != PLAYER_OK) {
+                LOG_ERR("Failed to start audio playback: %d", ret);
+            } else {
+                LOG_INF("Audio playback started from '%s'", play_file);
+                /* TODO: Handle play_count > 1 and infinite playback in audio player */
+                if (parsed_msg.metadata.play_count != 1) {
+                    LOG_WRN("play_count=%d not yet supported, playing once", 
+                            parsed_msg.metadata.play_count);
                 }
             }
             
-            /* Delete temporary file - both the standard temp file and MQTT temp file */
-            if (audio_in_file) {
-                file_manager_delete(temp_audio_file);
-            } else {
-                file_manager_delete(TEMP_AUDIO_FILE_PATH);
-            }
+            /* TODO: Delete temporary file after playback completes.
+             * For now, we'll leave it and it will be overwritten by next audio.
+             * Proper solution would be to have audio player notify when done. */
+            LOG_DBG("Temporary audio file kept for playback: %s", play_file);
         }
 
 }

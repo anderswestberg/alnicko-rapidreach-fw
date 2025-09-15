@@ -304,7 +304,7 @@ player_status_t audio_player_set_volume(int volume)
                                    AUDIO_PROPERTY_OUTPUT_VOLUME,
                                    AUDIO_CHANNEL_HEADPHONE_RIGHT,
                                    audio_player_cfg.volume);
-#elif defined(CONFIG_DT_HAS_TI_TAS6422DAC_ENABLED)
+#elif DT_NODE_HAS_COMPAT(DT_NODELABEL(audio_codec), ti_tas6422dac)
     ret = audio_codec_set_property(codec_dev,
                                    AUDIO_PROPERTY_OUTPUT_VOLUME,
                                    AUDIO_CHANNEL_ALL,
@@ -648,6 +648,9 @@ static bool audio_player_decode_and_write(ogg_packet *op)
         LOG_ERR("Opus decoding error: %d", decoded_samples);
         return true;
     }
+    
+    /* Yield after decode to allow MQTT thread to run */
+    k_yield();
 
     int16_t *pcm_ptr           = (int16_t *)DecConfigOpus.pInternalMemory;
     int      samples_remaining = duplicate_samples(pcm_ptr, decoded_samples);
@@ -817,6 +820,9 @@ static void audio_thread_func(void)
                 }
 
                 ogg_sync_wrote(&oy, read_len);
+                
+                /* Yield after each file read to allow MQTT thread to run */
+                k_yield();
 
                 while (ogg_sync_pageout(&oy, &og) == 1 && !stopped) {
                     if (!audio_player_cfg.is_stream_init) {
@@ -842,6 +848,13 @@ static void audio_thread_func(void)
                         if (handle_audio_control_events()) {
                             stopped = true;
                             break;
+                        }
+                        
+                        /* Yield periodically to allow other threads (like MQTT) to run */
+                        static int yield_counter = 0;
+                        if (++yield_counter >= 3) {  /* Yield more frequently - every 3 packets */
+                            yield_counter = 0;
+                            k_yield();
                         }
                     }
                 }

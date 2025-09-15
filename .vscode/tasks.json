@@ -16,7 +16,6 @@
             "type": "shell",
             "command": "/bin/bash",
             "args": [
-                "-lc",
                 "pkill -f ST-LINK_gdbserver 2>/dev/null || true; /opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver -p 50000 -f /tmp/stlink_gdbserver.log -l 3 -cp /opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin --swd --frequency 50 -i 004B001F3234510936303532 -m 1 --halt"
             ],
             "problemMatcher": [],
@@ -25,7 +24,6 @@
                 "kind": "build",
                 "isDefault": false
             },
-            "dependsOn": "Reset Target and Prepare Debug"
         },
         {
             "label": "Program Firmware",
