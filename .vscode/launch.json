@@ -1,4 +1,3 @@
-
 {
     "version": "0.2.0",
     "configurations": [
@@ -51,6 +50,7 @@
             "servertype": "stlink",
             "runToEntryPoint": "main",
             "showDevDebugOutput": "raw",
+            "toolchainPrefix": "arm-zephyr-eabi",
             "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
             "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
             "device": "STM32H573II",
@@ -69,11 +69,11 @@
             "showDevDebugOutput": "raw",
             "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
             "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
+            "toolchainPrefix": "arm-zephyr-eabi",
             "device": "STM32H573II",
             "interface": "swd",
-            "serialNumber": "004B001F3234510936303532",
             "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
-            "serverArgs": ["-p", "61234", "-g", "-m", "0"]
+            "serverArgs": ["--frequency", "1000", "--halt", "-g", "-m", "0"]
         },
         {
             "name": "STlink launch (External Server)",
@@ -105,6 +105,45 @@
             "showDevDebugOutput": "raw",
             "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
             "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb"
+        },
+        {
+            "name": "STlink Debug (Connect Mode)",
+            "cwd": "${workspaceRoot}",
+            "executable": "build/zephyr/zephyr.elf",
+            "request": "attach",
+            "type": "cortex-debug",
+            "servertype": "stlink",
+            "showDevDebugOutput": "raw",
+            "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
+            "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
+            "toolchainPrefix": "arm-zephyr-eabi",
+            "device": "STM32H573II",
+            "interface": "swd",
+            "serialNumber": "004B001F3234510936303532",
+            "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
+            "serverArgs": ["--frequency", "1000"],
+            "preAttachCommands": ["monitor reset halt"]
+        },
+        {
+            "name": "Debug External GDB (Port 3333)",
+            "type": "cortex-debug",
+            "request": "attach",
+            "cwd": "${workspaceRoot}",
+            "executable": "build/zephyr/zephyr.elf",
+            "servertype": "external",
+            "gdbTarget": "localhost:3333",
+            "showDevDebugOutput": "raw",
+            "armToolchainPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/",
+            "gdbPath": "/home/rapidreach/zephyr-sdk-0.17.2/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
+            "toolchainPrefix": "arm-zephyr-eabi",
+            "overrideLaunchCommands": [
+                "monitor reset halt",
+                "load"
+            ],
+            "overrideRestartCommands": [
+                "monitor reset halt",
+                "load"
+            ]
         }
     ]
 }

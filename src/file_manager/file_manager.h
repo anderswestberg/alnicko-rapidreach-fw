@@ -10,6 +10,16 @@
 #include <stdint.h>
 
 /**
+ * @brief Initialize the file manager and mount the file system
+ * 
+ * This function mounts the LittleFS file system at the configured mount point.
+ * It is automatically called on first file operation if not already initialized.
+ * 
+ * @return 0 on success, negative error code on failure
+ */
+int file_manager_init(void);
+
+/**
  * @brief Write data to a file
  * 
  * @param filepath Path to the file

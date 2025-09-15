@@ -11,6 +11,7 @@
 #include "../dev_info/dev_info.h"
 #include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
+#include <zephyr/devicetree.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -38,14 +39,29 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
 {
     mqtt_parsed_message_t parsed_msg;
     int ret;
+    const char *temp_audio_file = "/lfs/mqtt_audio_temp.opus";
+    bool audio_in_file = false;
     
     LOG_INF("Received audio alert on topic '%s' (%zu bytes)", topic, payload_len);
     
+    /* Check if this is just JSON metadata (audio in file) */
+    if (payload_len < 256 && file_manager_exists(temp_audio_file) == 1) {
+        /* Large audio message was saved to file, we only have JSON */
+        audio_in_file = true;
+        LOG_INF("Audio data is in file %s", temp_audio_file);
+    }
+    
     /* Parse the MQTT message */
     ret = mqtt_parse_message(payload, payload_len, &parsed_msg);
-    if (ret != MQTT_PARSER_SUCCESS) {
+    if (ret == MQTT_PARSER_ERR_SIZE_MISMATCH && audio_in_file) {
+        /* Expected - we only have JSON, audio is in file */
+        LOG_INF("JSON parsed, audio data size: %zu", parsed_msg.metadata.opus_data_size);
+    } else if (ret != MQTT_PARSER_SUCCESS) {
         LOG_ERR("Failed to parse MQTT audio message: %s", 
                 mqtt_parser_error_string(ret));
+        if (audio_in_file) {
+            file_manager_delete(temp_audio_file);
+        }
         return;
     }
     
@@ -70,13 +86,22 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
             char filepath[128];
             snprintf(filepath, sizeof(filepath), "/lfs/%s", parsed_msg.metadata.filename);
             
-            ret = file_manager_write(filepath, parsed_msg.opus_data, parsed_msg.opus_data_len);
-            if (ret < 0) {
-                LOG_ERR("Failed to save audio file '%s': %d", filepath, ret);
-                return;
+            if (audio_in_file) {
+                /* Audio is already in temp file, TODO: implement file copy */
+                LOG_INF("Audio data in temp file, playing from there");
+                /* For now, play from temp file */
+                strcpy(filepath, temp_audio_file);
+            } else {
+                ret = file_manager_write(filepath, parsed_msg.opus_data, parsed_msg.opus_data_len);
+                if (ret < 0) {
+                    LOG_ERR("Failed to save audio file '%s': %d", filepath, ret);
+                    if (audio_in_file) {
+                        file_manager_delete(temp_audio_file);
+                    }
+                    return;
+                }
+                LOG_INF("Saved audio to '%s'", filepath);
             }
-            
-            LOG_INF("Saved audio to '%s'", filepath);
             
             /* Play from saved file */
             for (uint32_t i = 0; i < parsed_msg.metadata.play_count || parsed_msg.metadata.play_count == 0; i++) {
@@ -96,24 +121,54 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                 }
             }
         } else {
-            /* Save to temporary file for immediate playback */
-            ret = file_manager_write(TEMP_AUDIO_FILE_PATH, parsed_msg.opus_data, parsed_msg.opus_data_len);
-            if (ret < 0) {
-                LOG_ERR("Failed to save temporary audio file: %d", ret);
-                return;
+            /* Use temporary file for immediate playback */
+            const char *play_file = audio_in_file ? temp_audio_file : TEMP_AUDIO_FILE_PATH;
+            
+            if (!audio_in_file) {
+                /* Save to temporary file */
+                ret = file_manager_write(TEMP_AUDIO_FILE_PATH, parsed_msg.opus_data, parsed_msg.opus_data_len);
+                if (ret < 0) {
+                    LOG_ERR("Failed to save temporary audio file: %d", ret);
+                    return;
+                }
             }
             
             /* Set volume if supported */
             if (parsed_msg.metadata.volume <= 100) {
+#if defined(CONFIG_DT_HAS_TI_TAS6422DAC_ENABLED)
+                /* Map 0-100% to TAS6422DAC range (-200 to +48 in 0.5 dB steps)
+                 * Web volume:  Codec value:  dB:
+                 * 0%          -200          -100 dB (mute)
+                 * 15%         -120          -60 dB
+                 * 50%         -50           -25 dB  
+                 * 80%         0             0 dB
+                 * 100%        48            +24 dB (max)
+                 */
+                int codec_volume;
+                if (parsed_msg.metadata.volume == 0) {
+                    codec_volume = -200;  /* Mute */
+                } else if (parsed_msg.metadata.volume <= 80) {
+                    /* 0-80% maps to -200 to 0 (mute to 0 dB) */
+                    codec_volume = -200 + (parsed_msg.metadata.volume * 200 / 80);
+                } else {
+                    /* 80-100% maps to 0 to +48 (0 dB to +24 dB) */
+                    codec_volume = (parsed_msg.metadata.volume - 80) * 48 / 20;
+                }
+                LOG_INF("Mapping web volume %d%% to codec value %d", 
+                        parsed_msg.metadata.volume, codec_volume);
+                ret = audio_player_set_volume(codec_volume);
+#else
+                /* For other codecs, pass volume directly */
                 ret = audio_player_set_volume(parsed_msg.metadata.volume);
+#endif
                 if (ret != PLAYER_OK) {
-                    LOG_WRN("Failed to set volume to %d: %d", parsed_msg.metadata.volume, ret);
+                    LOG_WRN("Failed to set volume: %d", ret);
                 }
             }
             
             /* Play the audio */
             for (uint32_t i = 0; i < parsed_msg.metadata.play_count || parsed_msg.metadata.play_count == 0; i++) {
-                ret = audio_player_start(TEMP_AUDIO_FILE_PATH);
+                ret = audio_player_start(play_file);
                 if (ret != PLAYER_OK) {
                     LOG_ERR("Failed to start audio playback: %d", ret);
                     break;
@@ -129,8 +184,12 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                 }
             }
             
-            /* Delete temporary file */
-            file_manager_delete(TEMP_AUDIO_FILE_PATH);
+            /* Delete temporary file - both the standard temp file and MQTT temp file */
+            if (audio_in_file) {
+                file_manager_delete(temp_audio_file);
+            } else {
+                file_manager_delete(TEMP_AUDIO_FILE_PATH);
+            }
         }
 
 }

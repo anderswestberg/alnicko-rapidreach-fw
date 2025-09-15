@@ -5,10 +5,66 @@
 
 #include "file_manager.h"
 #include <zephyr/fs/fs.h>
+#include <zephyr/fs/littlefs.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/storage/flash_map.h>
 #include <string.h>
 
-LOG_MODULE_REGISTER(file_manager, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(file_manager, CONFIG_RPR_FILE_MANAGER_LOG_LEVEL);
+
+/* File system mount configuration */
+FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(storage);
+static struct fs_mount_t lfs_storage_mnt = {
+    .type = FS_LITTLEFS,
+    .fs_data = &storage,
+    .storage_dev = (void *)FIXED_PARTITION_ID(storage_partition),
+    .mnt_point = CONFIG_RPR_FS_MNT_POINT,
+};
+
+static bool fs_mounted = false;
+
+int file_manager_init(void)
+{
+    int ret;
+    struct fs_statvfs stats;
+    
+    if (fs_mounted) {
+        return 0;
+    }
+    
+    LOG_INF("Mounting LittleFS at %s", lfs_storage_mnt.mnt_point);
+    
+    ret = fs_mount(&lfs_storage_mnt);
+    if (ret < 0) {
+        LOG_ERR("Failed to mount LittleFS: %d", ret);
+        return ret;
+    }
+    
+    /* Get file system statistics */
+    ret = fs_statvfs(lfs_storage_mnt.mnt_point, &stats);
+    if (ret < 0) {
+        LOG_ERR("Failed to get file system stats: %d", ret);
+        fs_unmount(&lfs_storage_mnt);
+        return ret;
+    }
+    
+    LOG_INF("LittleFS mounted successfully:");
+    LOG_INF("  Block size: %lu", stats.f_bsize);
+    LOG_INF("  Total blocks: %lu", stats.f_blocks);
+    LOG_INF("  Free blocks: %lu", stats.f_bfree);
+    
+    fs_mounted = true;
+    return 0;
+}
+
+/* Ensure file system is mounted before operations */
+static int ensure_fs_mounted(void)
+{
+    if (!fs_mounted) {
+        return file_manager_init();
+    }
+    return 0;
+}
 
 int file_manager_write(const char *filepath, const void *data, size_t len)
 {
@@ -17,6 +73,12 @@ int file_manager_write(const char *filepath, const void *data, size_t len)
 
     if (!filepath || !data || len == 0) {
         return -EINVAL;
+    }
+    
+    /* Ensure file system is mounted */
+    ret = ensure_fs_mounted();
+    if (ret < 0) {
+        return ret;
     }
 
     fs_file_t_init(&file);
@@ -55,6 +117,12 @@ int file_manager_delete(const char *filepath)
     if (!filepath) {
         return -EINVAL;
     }
+    
+    /* Ensure file system is mounted */
+    ret = ensure_fs_mounted();
+    if (ret < 0) {
+        return ret;
+    }
 
     ret = fs_unlink(filepath);
     if (ret < 0 && ret != -ENOENT) {
@@ -73,6 +141,12 @@ int file_manager_exists(const char *filepath)
 
     if (!filepath) {
         return -EINVAL;
+    }
+    
+    /* Ensure file system is mounted */
+    ret = ensure_fs_mounted();
+    if (ret < 0) {
+        return ret;
     }
 
     ret = fs_stat(filepath, &entry);

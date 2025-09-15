@@ -367,7 +367,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
    * GET /api/audio/encoding-options
    */
   router.get('/audio/encoding-options', (_req: Request, res: Response) => {
-    res.json({
+    return res.json({
       success: true,
       options: {
         codecs: ['opus'],
@@ -422,6 +422,8 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
           // Ignore errors
         }
       }, 5 * 60 * 1000);
+      
+      return; // Explicitly return for TypeScript
       
     } catch (error) {
       logger.error('Error serving audio file:', error);

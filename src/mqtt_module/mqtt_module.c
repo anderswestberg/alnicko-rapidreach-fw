@@ -24,6 +24,11 @@
 #include "../init_state_machine/init_state_machine.h"
 #endif
 
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+#include "../file_manager/file_manager.h"
+#include <zephyr/fs/fs.h>
+#endif
+
 LOG_MODULE_REGISTER(mqtt_module, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
 /* MQTT client instance */
@@ -161,21 +166,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
 
     case MQTT_EVT_PUBLISH: {
         const struct mqtt_publish_param *pub = &evt->param.publish;
-        uint8_t payload_buf[256];
-        size_t payload_len = pub->message.payload.len;
-        
-        /* Ensure payload fits in buffer */
-        if (payload_len > sizeof(payload_buf) - 1) {
-            payload_len = sizeof(payload_buf) - 1;
-        }
-        
-        /* Read the payload */
-        int ret = mqtt_read_publish_payload_blocking(client, payload_buf, payload_len);
-        if (ret < 0) {
-            LOG_ERR("Failed to read MQTT payload: %d", ret);
-            break;
-        }
-        payload_buf[payload_len] = '\0';
+        size_t total_len = pub->message.payload.len;
         
         /* Extract topic */
         char topic_buf[128];
@@ -186,20 +177,195 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         memcpy(topic_buf, pub->message.topic.topic.utf8, topic_len);
         topic_buf[topic_len] = '\0';
         
-        LOG_DBG("Received PUBLISH on topic '%s' [%d bytes]", topic_buf, payload_len);
+        LOG_INF("Received PUBLISH on topic '%s' [%zu bytes]", topic_buf, total_len);
         
-        /* Find matching subscription and call handler */
-        k_mutex_lock(&subscriptions_mutex, K_FOREVER);
-        for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
-            if (subscriptions[i].active && 
-                strcmp(subscriptions[i].topic, topic_buf) == 0) {
-                if (subscriptions[i].handler) {
-                    subscriptions[i].handler(topic_buf, payload_buf, payload_len);
+        /* Check if this is a potentially large audio message */
+        if (strstr(topic_buf, "rapidreach/audio/") != NULL && total_len > 256) {
+            /* Handle large audio message with chunked reading */
+            LOG_INF("Processing large audio message (%zu bytes)", total_len);
+            
+            /* First, read up to 512 bytes to get the JSON header */
+            uint8_t json_buf[512];
+            size_t json_read = (total_len < sizeof(json_buf)) ? total_len : sizeof(json_buf);
+            int ret = mqtt_read_publish_payload_blocking(client, json_buf, json_read);
+            if (ret < 0) {
+                LOG_ERR("Failed to read JSON header: %d", ret);
+                break;
+            }
+            
+            /* Find the end of JSON (look for the last '}') */
+            int json_end = -1;
+            for (int i = json_read - 1; i >= 0; i--) {
+                if (json_buf[i] == '}') {
+                    json_end = i + 1;
+                    /* Make sure this is the end of the JSON by checking for audio data */
+                    if (json_end < json_read && json_buf[json_end] != '{') {
+                        break;
+                    }
+                }
+            }
+            
+            if (json_end < 0) {
+                LOG_ERR("Could not find JSON boundary in first %zu bytes", json_read);
+                /* Consume the rest of the message */
+                uint8_t discard[256];
+                size_t remaining = total_len - json_read;
+                while (remaining > 0) {
+                    size_t chunk = (remaining < sizeof(discard)) ? remaining : sizeof(discard);
+                    mqtt_read_publish_payload_blocking(client, discard, chunk);
+                    remaining -= chunk;
                 }
                 break;
             }
+            
+            LOG_INF("JSON header is %d bytes, audio starts at byte %d", json_end, json_end);
+            
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+            /* Save audio data to file */
+            const char *audio_file = "/lfs/mqtt_audio_temp.opus";
+            struct fs_file_t file;
+            fs_file_t_init(&file);
+            
+            /* Ensure file system is mounted */
+            ret = file_manager_init();
+            if (ret < 0 && ret != -EALREADY) {
+                LOG_ERR("Failed to initialize file manager: %d", ret);
+                /* Consume the rest of the message */
+                uint8_t discard[256];
+                size_t remaining = total_len - json_read;
+                while (remaining > 0) {
+                    size_t chunk = (remaining < sizeof(discard)) ? remaining : sizeof(discard);
+                    mqtt_read_publish_payload_blocking(client, discard, chunk);
+                    remaining -= chunk;
+                }
+                break;
+            }
+            
+            /* Calculate how much audio data we already have in json_buf */
+            size_t audio_in_buf = json_read - json_end;
+            size_t audio_remaining = total_len - json_end;
+            
+            /* Open file for writing */
+            ret = fs_open(&file, audio_file, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
+            if (ret < 0) {
+                LOG_ERR("Failed to open audio file: %d", ret);
+                /* Consume the rest */
+                uint8_t discard[256];
+                while (audio_remaining > 0) {
+                    size_t chunk = (audio_remaining < sizeof(discard)) ? audio_remaining : sizeof(discard);
+                    mqtt_read_publish_payload_blocking(client, discard, chunk);
+                    audio_remaining -= chunk;
+                }
+                break;
+            }
+            
+            /* Write initial audio data from json_buf if any */
+            size_t written = 0;
+            if (audio_in_buf > 0) {
+                ret = fs_write(&file, json_buf + json_end, audio_in_buf);
+                if (ret < 0) {
+                    LOG_ERR("Failed to write initial audio chunk: %d", ret);
+                    fs_close(&file);
+                    /* Consume the rest */
+                    uint8_t discard[256];
+                    audio_remaining -= audio_in_buf;
+                    while (audio_remaining > 0) {
+                        size_t chunk = (audio_remaining < sizeof(discard)) ? audio_remaining : sizeof(discard);
+                        mqtt_read_publish_payload_blocking(client, discard, chunk);
+                        audio_remaining -= chunk;
+                    }
+                    break;
+                }
+                written = ret;
+                audio_remaining -= audio_in_buf;
+            }
+            
+            /* Read and write the rest of the audio data in chunks */
+            uint8_t chunk_buf[512];
+            
+            while (audio_remaining > 0) {
+                size_t chunk = (audio_remaining < sizeof(chunk_buf)) ? audio_remaining : sizeof(chunk_buf);
+                ret = mqtt_read_publish_payload_blocking(client, chunk_buf, chunk);
+                if (ret < 0) {
+                    LOG_ERR("Failed to read audio chunk: %d", ret);
+                    fs_close(&file);
+                    break;
+                }
+                
+                /* Write to file */
+                ret = fs_write(&file, chunk_buf, chunk);
+                if (ret < 0) {
+                    LOG_ERR("Failed to write audio chunk: %d", ret);
+                    fs_close(&file);
+                    break;
+                }
+                
+                written += ret;
+                audio_remaining -= chunk;
+                LOG_DBG("Wrote %d bytes, %zu remaining", ret, audio_remaining);
+            }
+            
+            fs_close(&file);
+            LOG_INF("Audio saved to %s (%zu bytes)", audio_file, written);
+            
+            /* Call handler with JSON metadata only */
+            k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+            for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+                if (subscriptions[i].active && 
+                    strcmp(subscriptions[i].topic, topic_buf) == 0) {
+                    if (subscriptions[i].handler) {
+                        /* Pass only the JSON part, null-terminated */
+                        json_buf[json_end] = '\0';
+                        subscriptions[i].handler(topic_buf, json_buf, json_end);
+                    }
+                    break;
+                }
+            }
+            k_mutex_unlock(&subscriptions_mutex);
+#else
+            LOG_ERR("File manager not available for audio storage");
+            /* Consume the rest of the message */
+            uint8_t discard[256];
+            size_t remaining = total_len - json_read;
+            while (remaining > 0) {
+                size_t chunk = (remaining < sizeof(discard)) ? remaining : sizeof(discard);
+                mqtt_read_publish_payload_blocking(client, discard, chunk);
+                remaining -= chunk;
+            }
+#endif
+        } else {
+            /* Small message - read it all at once */
+            uint8_t payload_buf[256];
+            size_t payload_len = total_len;
+            
+            /* Ensure payload fits in buffer */
+            if (payload_len > sizeof(payload_buf) - 1) {
+                payload_len = sizeof(payload_buf) - 1;
+            }
+            
+            /* Read the payload */
+            int ret = mqtt_read_publish_payload_blocking(client, payload_buf, payload_len);
+            if (ret < 0) {
+                LOG_ERR("Failed to read MQTT payload: %d", ret);
+                break;
+            }
+            payload_buf[payload_len] = '\0';
+            
+            LOG_DBG("Received message: %.*s", (int)payload_len, payload_buf);
+            
+            /* Find matching subscription and call handler */
+            k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+            for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+                if (subscriptions[i].active && 
+                    strcmp(subscriptions[i].topic, topic_buf) == 0) {
+                    if (subscriptions[i].handler) {
+                        subscriptions[i].handler(topic_buf, payload_buf, payload_len);
+                    }
+                    break;
+                }
+            }
+            k_mutex_unlock(&subscriptions_mutex);
         }
-        k_mutex_unlock(&subscriptions_mutex);
         
         /* Send PUBACK for QoS 1 */
         if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
