@@ -61,6 +61,9 @@ static struct sys_watchdog_config sys_watchdog_cfg = {
  */
 int system_watchdog_feed(void)
 {
+#ifdef CONFIG_RPR_DISABLE_WATCHDOG_WHILE_DEBUG
+    return 0;
+#endif
     if (!sys_watchdog_cfg.is_device_ready) {
         LOG_ERR("System Watchdog not ready");
         return -ENODEV;
@@ -84,6 +87,10 @@ int system_watchdog_feed(void)
  */
 static int system_watchdog_init(void)
 {
+#ifdef CONFIG_RPR_DISABLE_WATCHDOG_WHILE_DEBUG
+    LOG_WRN("System watchdog disabled for debug (CONFIG_RPR_DISABLE_WATCHDOG_WHILE_DEBUG)");
+    return 0;
+#endif
     if (!device_is_ready(sys_watchdog_cfg.wdt)) {
         LOG_ERR("%s: device not ready", sys_watchdog_cfg.wdt->name);
         return -ENODEV;

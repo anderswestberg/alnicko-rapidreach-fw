@@ -56,7 +56,9 @@
             "device": "STM32H573II",
             "interface": "swd",
             "serialNumber": "004B001F3234510936303532",
-            "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver"
+            "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
+            "serverArgs": ["-k", "--frequency", "1000"],
+            "preAttachCommands": ["monitor reset halt"]
         },
         {
             "name": "STlink launch (Simple)",
@@ -72,8 +74,9 @@
             "toolchainPrefix": "arm-zephyr-eabi",
             "device": "STM32H573II",
             "interface": "swd",
+            "serialNumber": "004B001F3234510936303532",
             "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
-            "serverArgs": ["--frequency", "1000", "--halt", "-g", "-m", "0"]
+            "serverArgs": ["-k", "--frequency", "1000"]
         },
         {
             "name": "STlink launch (External Server)",
@@ -121,7 +124,7 @@
             "interface": "swd",
             "serialNumber": "004B001F3234510936303532",
             "stlinkPath": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
-            "serverArgs": ["--frequency", "1000"],
+            "serverArgs": ["-k", "--frequency", "1000"],
             "preAttachCommands": ["monitor reset halt"]
         },
         {
