@@ -10,6 +10,9 @@
 #include "../mqtt_module/mqtt_module.h"
 #include "../dev_info/dev_info.h"
 #include "../rtc/rtc.h"
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+#include "../file_manager/file_manager.h"
+#endif
 #include <time.h>
 
 LOG_MODULE_REGISTER(mqtt_log, LOG_LEVEL_INF);
@@ -40,6 +43,8 @@ static struct {
 	/* Filesystem overflow */
 	bool fs_overflow_enabled;
 	uint32_t fs_log_count;
+	bool fs_init_pending;  /* Need to retry fs init */
+	uint32_t fs_init_retry_count;  /* Track retry attempts */
 
 	/* State */
 	bool initialized;
@@ -193,6 +198,28 @@ static void flush_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
 	if (!s.initialized) return;
+	
+	/* Retry filesystem init if it was pending, but limit retries */
+	if (s.fs_init_pending && !s.fs_overflow_enabled && s.fs_init_retry_count < 10) {
+		s.fs_init_retry_count++;
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+		/* Ensure file manager is initialized first */
+		int ret = file_manager_init();
+		if (ret < 0 && ret != -EALREADY) {
+			LOG_DBG("File manager not ready yet: %d", ret);
+		}
+#endif
+		int fs_ret = fs_log_init();
+		if (fs_ret == 0) {
+			s.fs_overflow_enabled = true;
+			s.fs_init_pending = false;
+			s.fs_init_retry_count = 0;
+			LOG_INF("MQTT log filesystem overflow enabled (retry during flush)");
+		} else if (s.fs_init_retry_count >= 10) {
+			s.fs_init_pending = false;  /* Give up after 10 retries */
+			LOG_ERR("MQTT log filesystem overflow permanently disabled after 10 retries (err: %d)", fs_ret);
+		}
+	}
 
 	if (s.count == 0 && s.fs_log_count == 0) {
 		goto resched;
@@ -243,7 +270,16 @@ resched:
 
 int mqtt_log_client_init(void)
 {
-	if (s.initialized) return 0;
+	/* Add a very early printk to see if function is called */
+	printk("\n=== MQTT LOG CLIENT INIT CALLED at %lld ms ===\n", k_uptime_get());
+	
+	if (s.initialized) {
+		printk("Already initialized, returning\n");
+		return 0;
+	}
+	
+	printk("First time init, proceeding...\n");
+	LOG_INF("Initializing MQTT log client...");
 
 	/* Compute short id */
 	size_t id_len = 0;
@@ -268,12 +304,34 @@ int mqtt_log_client_init(void)
 
 	s.backoff_ms = INITIAL_BACKOFF_MS;
 	s.consecutive_failures = 0;
+	s.fs_init_retry_count = 0;
 
 	/* Try to enable FS overflow */
-	if (fs_log_init() == 0) {
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+	/* Ensure file manager is initialized first */
+	printk("MQTT log client: Calling file_manager_init at %lld ms\n", k_uptime_get());
+	int ret = file_manager_init();
+	if (ret < 0 && ret != -EALREADY) {
+		LOG_WRN("Failed to initialize file manager: %d", ret);
+		printk("MQTT log client: Failed to init file manager: %d\n", ret);
+	} else {
+		printk("MQTT log client: file_manager_init returned: %d\n", ret);
+	}
+#endif
+	
+	printk("MQTT log client: Calling fs_log_init at %lld ms\n", k_uptime_get());
+	int fs_ret = fs_log_init();
+	printk("MQTT log client: fs_log_init returned: %d\n", fs_ret);
+	if (fs_ret == 0) {
 		s.fs_overflow_enabled = true;
+		s.fs_init_pending = false;
+		LOG_INF("MQTT log filesystem overflow enabled at %s", FS_LOG_FILE_PATH);
+		printk("MQTT log client: FS overflow enabled at %s\n", FS_LOG_FILE_PATH);
 	} else {
 		s.fs_overflow_enabled = false;
+		s.fs_init_pending = true;  /* Mark for retry later */
+		LOG_WRN("MQTT log filesystem overflow deferred - fs_log_init failed: %d", fs_ret);
+		printk("MQTT log client: FS overflow deferred - fs_log_init failed: %d (will retry later)\n", fs_ret);
 	}
 
 	s.initialized = true;
@@ -318,16 +376,48 @@ int mqtt_log_client_put(const char *level, const char *message, uint64_t timesta
 	e.message[sizeof(e.message) - 1] = '\0';
 
 	k_mutex_lock(&s.mutex, K_FOREVER);
+	
+	/* Retry filesystem init if it was pending and we're running out of buffer space */
+	if (s.fs_init_pending && !s.fs_overflow_enabled && s.count >= (s.capacity * 3 / 4) && s.fs_init_retry_count < 10) {
+		s.fs_init_retry_count++;
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+		/* Ensure file manager is initialized first */
+		int ret = file_manager_init();
+		if (ret < 0 && ret != -EALREADY) {
+			LOG_DBG("File manager not ready yet: %d", ret);
+		}
+#endif
+		int fs_ret = fs_log_init();
+		if (fs_ret == 0) {
+			s.fs_overflow_enabled = true;
+			s.fs_init_pending = false;
+			s.fs_init_retry_count = 0;
+			LOG_INF("MQTT log filesystem overflow enabled (delayed init)");
+		} else if (s.fs_init_retry_count >= 10) {
+			s.fs_init_pending = false;  /* Give up after 10 retries */
+			LOG_ERR("MQTT log filesystem overflow permanently disabled after 10 retries (err: %d)", fs_ret);
+		}
+	}
+	
 	if (s.count >= s.capacity) {
 		/* spill to FS if possible */
 		if (s.fs_overflow_enabled && fs_log_write(&e) == 0) {
 			s.fs_log_count++;
+			if (s.fs_log_count == 1 || s.fs_log_count % 100 == 0) {
+				LOG_INF("MQTT log buffer full - spilled %u logs to filesystem", s.fs_log_count);
+			}
 		} else {
 			/* drop oldest */
 			s.tail = (s.tail + 1) % s.capacity;
 			/* add new */
 			s.buffer[s.head] = e;
 			s.head = (s.head + 1) % s.capacity;
+			static uint32_t dropped_count = 0;
+			dropped_count++;
+			if (dropped_count == 1 || dropped_count % 100 == 0) {
+				LOG_WRN("MQTT log buffer full - dropped %u logs (FS overflow %s)",
+				        dropped_count, s.fs_overflow_enabled ? "failed" : "disabled");
+			}
 		}
 	} else {
 		s.buffer[s.head] = e;
@@ -348,7 +438,32 @@ int mqtt_log_client_put(const char *level, const char *message, uint64_t timesta
 
 int mqtt_log_client_flush(void)
 {
+	/* Log the filesystem overflow status when we flush */
+	static bool status_logged = false;
+	if (!status_logged && s.initialized) {
+		printk("MQTT log client flush: FS overflow %s, buffer capacity: %d entries\n",
+		        s.fs_overflow_enabled ? "ENABLED" : "DISABLED", s.capacity);
+		LOG_INF("MQTT log client status: FS overflow %s, buffer capacity: %d entries",
+		        s.fs_overflow_enabled ? "ENABLED" : "DISABLED", s.capacity);
+		if (s.fs_overflow_enabled) {
+			printk("FS overflow path: %s\n", FS_LOG_FILE_PATH);
+			LOG_INF("FS overflow path: %s", FS_LOG_FILE_PATH);
+		}
+		status_logged = true;
+	}
+	
 	return schedule_flush(0);
+}
+
+void mqtt_log_client_get_status(bool *initialized, bool *fs_overflow_enabled, 
+                                 size_t *buffer_count, size_t *buffer_capacity,
+                                 size_t *fs_log_count)
+{
+	if (initialized) *initialized = s.initialized;
+	if (fs_overflow_enabled) *fs_overflow_enabled = s.fs_overflow_enabled;
+	if (buffer_count) *buffer_count = s.count;
+	if (buffer_capacity) *buffer_capacity = s.capacity;
+	if (fs_log_count) *fs_log_count = s.fs_log_count;
 }
 
 /* FS helpers (private copy similar to HTTP client) */
@@ -359,11 +474,26 @@ static int fs_log_init(void)
 	struct fs_log_header header;
 	int ret;
 
+	printk("fs_log_init: starting at %lld ms\n", k_uptime_get());
+
+	/* Ensure filesystem is mounted */
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+	ret = file_manager_init();
+	if (ret < 0 && ret != -EALREADY) {
+		printk("MQTT log: Failed to init file manager in fs_log_init: %d\n", ret);
+		return ret;
+	}
+#endif
+
 	fs_file_t_init(&file);
+	printk("fs_log_init: Opening %s\n", FS_LOG_FILE_PATH);
 	ret = fs_open(&file, FS_LOG_FILE_PATH, FS_O_RDWR);
 	if (ret < 0) {
+		/* File doesn't exist, try to create it */
+		printk("MQTT log: File %s doesn't exist (err %d), creating...\n", FS_LOG_FILE_PATH, ret);
 		ret = fs_open(&file, FS_LOG_FILE_PATH, FS_O_CREATE | FS_O_RDWR);
 		if (ret < 0) {
+			printk("MQTT log: Failed to create %s: %d\n", FS_LOG_FILE_PATH, ret);
 			return ret;
 		}
 		header.magic = FS_LOG_MAGIC;
@@ -377,14 +507,24 @@ static int fs_log_init(void)
 			return -EIO;
 		}
 	} else {
+		printk("fs_log_init: File exists, reading header\n");
 		ret = fs_read(&file, &header, sizeof(header));
-		if (ret != sizeof(header) || header.magic != FS_LOG_MAGIC || header.version != FS_LOG_VERSION) {
+		if (ret != sizeof(header)) {
+			printk("fs_log_init: Failed to read header, got %d bytes\n", ret);
+			fs_close(&file);
+			return -EIO;
+		}
+		if (header.magic != FS_LOG_MAGIC || header.version != FS_LOG_VERSION) {
+			printk("fs_log_init: Invalid header magic=0x%08x (expected 0x%08x) version=%u (expected %u)\n",
+			       header.magic, FS_LOG_MAGIC, header.version, FS_LOG_VERSION);
 			fs_close(&file);
 			return -EINVAL;
 		}
 		s.fs_log_count = header.total_logs;
+		printk("fs_log_init: Header OK, total_logs=%u\n", header.total_logs);
 	}
 	fs_close(&file);
+	printk("fs_log_init: Success!\n");
 	return 0;
 #else
 	return -ENOTSUP;

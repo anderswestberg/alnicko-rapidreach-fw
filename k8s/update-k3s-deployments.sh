@@ -14,20 +14,20 @@ echo "Version: $VERSION"
 cat > /tmp/k3s-update-commands.sh << 'EOF'
 #!/bin/bash
 echo "Updating device-server to version: $1"
-kubectl set image deployment/device-server device-server=enerahub/device-server:$1 -n rapidreach
+sudo kubectl set image deployment/device-server device-server=enerahub/device-server:$1 -n rapidreach
 
 echo "Updating web-app to version: $1"
-kubectl set image deployment/web-app web-app=enerahub/web-app:$1 -n rapidreach
+sudo kubectl set image deployment/web-app web-app=enerahub/web-app:$1 -n rapidreach
 
 echo ""
 echo "Checking rollout status..."
-kubectl rollout status deployment/device-server -n rapidreach
-kubectl rollout status deployment/web-app -n rapidreach
+sudo kubectl rollout status deployment/device-server -n rapidreach --timeout=60s || true
+sudo kubectl rollout status deployment/web-app -n rapidreach --timeout=60s || true
 
 echo ""
 echo "Current deployments:"
-kubectl get deployments -n rapidreach
-kubectl get pods -n rapidreach
+sudo kubectl get deployments -n rapidreach
+sudo kubectl get pods -n rapidreach
 EOF
 
 chmod +x /tmp/k3s-update-commands.sh

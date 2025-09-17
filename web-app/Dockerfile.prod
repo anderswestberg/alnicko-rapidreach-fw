@@ -2,7 +2,6 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-# Copy .npmrc if it exists for private registry authentication
 COPY .npmrc* ./
 RUN npm ci --legacy-peer-deps
 COPY . .

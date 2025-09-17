@@ -300,6 +300,7 @@ export class DeviceMqttClient extends EventEmitter {
             
             return {
               deviceId: parsed.source || deviceId,
+              device: parsed.source || deviceId,  // Add device field for Source column
               source: p.module || 'unknown',  // Use module as source instead of deviceId
               level: level,
               levelNo: levelMap[level] || 2, // Default to info (2) if unknown
@@ -328,6 +329,7 @@ export class DeviceMqttClient extends EventEmitter {
             
             return {
               deviceId,
+              device: deviceId,  // Add device field for Source column
               source: p.module || 'unknown',  // Use module as source
               level: level,
               levelNo: levelMap[level] || 2,
@@ -353,6 +355,7 @@ export class DeviceMqttClient extends EventEmitter {
           };
           items = [{
             deviceId,
+            device: deviceId,  // Add device field for Source column
             source: parsed.module || 'unknown',  // Use module as source
             level: level,
             levelNo: levelMap[level] || 2,
@@ -365,6 +368,7 @@ export class DeviceMqttClient extends EventEmitter {
         // Not JSON, store as simple text log
         items = [{
           deviceId,
+          device: deviceId,  // Add device field for Source column
           source: 'unknown',  // No module info in plain text
           level: 'info',
           levelNo: 2,  // Info level

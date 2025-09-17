@@ -94,6 +94,9 @@ static void mqtt_log_backend_panic(const struct log_backend *const backend)
 
 static void mqtt_log_backend_init(const struct log_backend *const backend)
 {
+    /* Use printk since logging might not be ready yet */
+    printk("MQTT log backend initializing...\n");
+    
     /* Initialize the MQTT log client */
     mqtt_log_client_init();
 }

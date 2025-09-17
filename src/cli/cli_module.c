@@ -57,6 +57,12 @@
 #ifdef CONFIG_RPR_MODULE_MQTT
 #include "../mqtt_module/mqtt_module.h"
 #endif
+#ifdef CONFIG_RPR_MQTT_LOG_CLIENT
+#include "../mqtt_log_client/mqtt_log_client.h"
+#endif
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+#include "../file_manager/file_manager.h"
+#endif
 
 #ifdef CONFIG_EXAMPLES_ENABLE_MAIN_EXAMPLES
 #include "power_supervisor.h"
@@ -2799,6 +2805,92 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_SUBCMD_SET_END);
 #endif
 
+#ifdef CONFIG_RPR_MQTT_LOG_CLIENT
+/**
+ * @brief MQTT log client status command
+ */
+static int cmd_mqtt_log_status(const struct shell *sh, size_t argc, char **argv)
+{
+    bool initialized, fs_overflow_enabled;
+    size_t buffer_count, buffer_capacity, fs_log_count;
+    
+    mqtt_log_client_get_status(&initialized, &fs_overflow_enabled, 
+                               &buffer_count, &buffer_capacity,
+                               &fs_log_count);
+    
+    shell_print(sh, "MQTT Log Client Status:");
+    shell_print(sh, "  Initialized: %s", initialized ? "Yes" : "No");
+    shell_print(sh, "  Buffer: %zu/%zu entries", buffer_count, buffer_capacity);
+    shell_print(sh, "  Filesystem overflow: %s", fs_overflow_enabled ? "ENABLED" : "DISABLED");
+    if (fs_overflow_enabled) {
+        shell_print(sh, "  FS overflow path: /lfs/mqtt_logs.bin");
+        shell_print(sh, "  Logs spilled to FS: %zu", fs_log_count);
+    }
+    
+    return 0;
+}
+
+/**
+ * @brief Test MQTT log filesystem overflow
+ */
+static int cmd_mqtt_log_test_fs(const struct shell *sh, size_t argc, char **argv)
+{
+    struct fs_file_t file;
+    int ret;
+    
+    shell_print(sh, "Testing filesystem for MQTT log overflow...");
+    
+    /* Test file manager init */
+#ifdef CONFIG_RPR_MODULE_FILE_MANAGER
+    ret = file_manager_init();
+    shell_print(sh, "File manager init: %d", ret);
+#endif
+    
+    /* Test file creation */
+    fs_file_t_init(&file);
+    ret = fs_open(&file, "/lfs/test.txt", FS_O_CREATE | FS_O_RDWR);
+    if (ret < 0) {
+        shell_error(sh, "Failed to create test file: %d", ret);
+        shell_print(sh, "Filesystem may not be mounted");
+    } else {
+        shell_print(sh, "Successfully created test file");
+        fs_close(&file);
+        
+        /* Try to create the actual log file */
+        ret = fs_open(&file, "/lfs/mqtt_logs.bin", FS_O_CREATE | FS_O_RDWR);
+        if (ret < 0) {
+            shell_error(sh, "Failed to create MQTT log file: %d", ret);
+        } else {
+            shell_print(sh, "Successfully created MQTT log file");
+            fs_close(&file);
+        }
+    }
+    
+    return 0;
+}
+
+/**
+ * @brief Delete MQTT log file
+ */
+static int cmd_mqtt_log_delete(const struct shell *sh, size_t argc, char **argv)
+{
+    int ret = fs_unlink("/lfs/mqtt_logs.bin");
+    if (ret == 0) {
+        shell_print(sh, "Successfully deleted /lfs/mqtt_logs.bin");
+    } else {
+        shell_error(sh, "Failed to delete /lfs/mqtt_logs.bin: %d", ret);
+    }
+    return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+        sub_mqtt_log,
+        SHELL_CMD(status, NULL, "Show MQTT log client status", cmd_mqtt_log_status),
+        SHELL_CMD(test_fs, NULL, "Test filesystem for overflow", cmd_mqtt_log_test_fs),
+        SHELL_CMD(delete, NULL, "Delete MQTT log file", cmd_mqtt_log_delete),
+        SHELL_SUBCMD_SET_END);
+#endif
+
 /**
  * @brief Shell command to display board info, firmware and hardware version information.
  */
@@ -2871,4 +2963,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 SHELL_CMD_REGISTER(app, &sub_app, "Application commands", NULL);
 #ifdef CONFIG_RPR_MODULE_MQTT
 SHELL_CMD_REGISTER(mqtt, &sub_mqtt, "MQTT client control", NULL);
+#endif
+#ifdef CONFIG_RPR_MQTT_LOG_CLIENT
+SHELL_CMD_REGISTER(mqtt_log, &sub_mqtt_log, "MQTT log client control", NULL);
 #endif

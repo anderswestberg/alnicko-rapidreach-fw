@@ -417,6 +417,9 @@ static void state_operational_entry(init_sm_context_t *ctx, init_event_t event)
     ret = mqtt_log_client_init();
     if (ret == 0) {
         LOG_INF("MQTT log client initialized successfully");
+        /* Flush any logs that were buffered before MQTT connected */
+        mqtt_log_client_flush();
+        LOG_INF("Flushed buffered logs to MQTT");
     } else {
         LOG_ERR("Failed to initialize MQTT log client: %d", ret);
     }
@@ -617,7 +620,9 @@ static void state_mqtt_init_start_handler(init_sm_context_t *ctx, init_event_t e
         } else {
             ret = mqtt_module_connect();
             if (ret == 0) {
-                state_transition(ctx, STATE_MQTT_CONNECTING);
+                /* mqtt_module_connect() is synchronous - if it returns 0, we're connected */
+                LOG_INF("MQTT connected successfully via mqtt_module_connect()");
+                state_transition(ctx, STATE_OPERATIONAL);
             } else if (ret == -EALREADY) {
                 LOG_INF("MQTT connection already in progress");
                 state_transition(ctx, STATE_MQTT_CONNECTING);
