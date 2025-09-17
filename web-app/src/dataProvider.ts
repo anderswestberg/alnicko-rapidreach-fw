@@ -11,6 +11,23 @@ const apiClient = axios.create({
   },
 });
 
+// Simple client-side logger that posts logs to the device-server
+export async function postWebLog(level: 'info' | 'warn' | 'error', message: string, meta?: Record<string, any>) {
+  try {
+    await apiClient.post('/logs', {
+      level,
+      message,
+      device: 'web-app', // Identifies this as coming from web app
+      source: meta?.source, // Optional module/component within web app
+      ...meta,
+    });
+  } catch (e) {
+    // Avoid throwing from logger; fallback to console
+    // eslint-disable-next-line no-console
+    console.warn('web log post failed', e);
+  }
+}
+
 // Generic data provider that works with the new data provider API
 export const dataProvider: DataProvider = {
   getList: async (resource: string, params: any) => {

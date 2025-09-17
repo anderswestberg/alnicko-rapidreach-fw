@@ -5,6 +5,16 @@
 
 #ifndef MQTT_MODULE_H
 #define MQTT_MODULE_H
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Expose latest temp file for handlers that need it */
+extern char g_mqtt_last_temp_file[];
+
+#ifdef __cplusplus
+}
+#endif
 
 #include <zephyr/kernel.h>
 

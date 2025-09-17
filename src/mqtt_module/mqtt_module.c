@@ -56,6 +56,9 @@ static K_THREAD_STACK_DEFINE(audio_work_queue_stack, AUDIO_WORK_QUEUE_STACK_SIZE
 static struct k_work_q audio_work_queue;
 static bool audio_work_queue_initialized = false;
 
+/* Share latest temp audio file path with handler */
+char g_mqtt_last_temp_file[32] = {0};
+
 /* Work item for processing audio messages */
 struct audio_msg_work {
     struct k_work work;
@@ -63,7 +66,7 @@ struct audio_msg_work {
     bool in_use;
     uint8_t json_header[512];  /* Small buffer just for JSON header */
     size_t json_len;
-    const char *temp_file;  /* Path to temporary file with audio data */
+    char temp_file[32];  /* Store filename instead of pointer */
 };
 
 #define AUDIO_WORK_ITEMS 2  /* Allow 2 pending audio messages */
@@ -288,7 +291,12 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             
 #ifdef CONFIG_RPR_MODULE_FILE_MANAGER
             /* Save audio data to file with frequent yields */
-            const char *audio_file = "/lfs/mqtt_audio_temp.opus";
+            /* Use alternating files to avoid conflicts with audio player */
+            static int file_index = 0;
+            char audio_file[32];
+            snprintf(audio_file, sizeof(audio_file), "/lfs/mqtt_audio_%d.opus", file_index);
+            file_index = (file_index + 1) % 2; /* Alternate between 0 and 1 */
+            
             struct fs_file_t file;
             fs_file_t_init(&file);
             
@@ -416,10 +424,15 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 /* Copy JSON header */
                 memcpy(work_item->json_header, json_buf, json_end);
                 work_item->json_len = json_end;
-                strncpy(work_item->topic, topic_buf, sizeof(work_item->topic) - 1);
-                work_item->topic[sizeof(work_item->topic) - 1] = '\0';
-                work_item->temp_file = audio_file;
+                    strncpy(work_item->topic, topic_buf, sizeof(work_item->topic) - 1);
+                    work_item->topic[sizeof(work_item->topic) - 1] = '\0';
+                    strncpy(work_item->temp_file, audio_file, sizeof(work_item->temp_file) - 1);
+                    work_item->temp_file[sizeof(work_item->temp_file) - 1] = '\0';
                 
+                /* Update global latest temp file for handler */
+                strncpy(g_mqtt_last_temp_file, audio_file, sizeof(g_mqtt_last_temp_file) - 1);
+                g_mqtt_last_temp_file[sizeof(g_mqtt_last_temp_file) - 1] = '\0';
+
                 /* Submit to work queue */
                 ret = k_work_submit_to_queue(&audio_work_queue, &work_item->work);
                 if (ret < 0) {
@@ -441,6 +454,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 }
             } else {
                 LOG_ERR("No available work items, calling handler directly");
+                /* Update global latest temp file for handler */
+                strncpy(g_mqtt_last_temp_file, audio_file, sizeof(g_mqtt_last_temp_file) - 1);
+                g_mqtt_last_temp_file[sizeof(g_mqtt_last_temp_file) - 1] = '\0';
                 /* Call handler directly */
                 k_mutex_lock(&subscriptions_mutex, K_FOREVER);
                 for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
@@ -595,17 +611,8 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                         event_handler(MQTT_EVENT_DISCONNECTED);
                     }
                 } else if (ret == -EBUSY) {
-                    LOG_DBG("MQTT socket busy (disconnected): %d", ret);
-                    mqtt_connected = false;
-                    last_reconnect_attempt = current_time;
-                    
-                    /* Mark socket as invalid to force cleanup on reconnect */
-                    client.transport.tcp.sock = -1;
-                    
-                    /* Notify about disconnection */
-                    if (event_handler) {
-                        event_handler(MQTT_EVENT_DISCONNECTED);
-                    }
+                    /* Busy means a publish payload read is in progress; not a disconnect. */
+                    LOG_DBG("MQTT busy (payload read in progress), will retry later");
                 } else if (ret != -EAGAIN && ret != -EWOULDBLOCK) {
                     LOG_DBG("MQTT input error (non-fatal): %d", ret);
                     /* Don't immediately disconnect on other errors */
@@ -623,10 +630,10 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                 
                 ret = mqtt_live(&client);
                 if (ret < 0 && ret != -EAGAIN) {
-                    if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EPIPE || ret == -EBUSY) {
+                    if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EPIPE) {
                         LOG_ERR("MQTT connection lost during live: %d (time: %lld)", ret, current_time);
-                        LOG_ERR("Live error: ENOTCONN=%d, ECONNRESET=%d, EPIPE=%d, EBUSY=%d",
-                                (ret == -ENOTCONN), (ret == -ECONNRESET), (ret == -EPIPE), (ret == -EBUSY));
+                        LOG_ERR("Live error: ENOTCONN=%d, ECONNRESET=%d, EPIPE=%d",
+                                (ret == -ENOTCONN), (ret == -ECONNRESET), (ret == -EPIPE));
                         mqtt_connected = false;
                         last_reconnect_attempt = current_time;
                         
@@ -637,6 +644,9 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                         if (event_handler) {
                             event_handler(MQTT_EVENT_DISCONNECTED);
                         }
+                    } else if (ret == -EBUSY) {
+                        /* Busy while keepalive typically means payload read in progress. Not fatal. */
+                        LOG_DBG("mqtt_live busy (payload read in progress), will retry later");
                     } else {
                         LOG_DBG("MQTT live error (non-fatal): %d", ret);
                     }

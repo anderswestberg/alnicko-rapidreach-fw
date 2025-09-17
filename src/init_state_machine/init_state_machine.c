@@ -38,6 +38,46 @@ LOG_MODULE_REGISTER(init_sm, CONFIG_RPR_MODULE_INIT_SM_LOG_LEVEL);
 #define RETRY_DELAY_MS              K_SECONDS(5)
 #define MAX_RETRY_COUNT             3
 
+/* Event filter table - defines which events are allowed in each state */
+static const uint32_t allowed_events[STATE_MAX] = {
+    [STATE_INIT] = BIT(EVENT_START) | BIT(EVENT_NETWORK_UP),
+    
+    [STATE_WAIT_NETWORK] = BIT(EVENT_NETWORK_UP) | BIT(EVENT_TIMEOUT) | BIT(EVENT_RETRY),
+    
+    [STATE_NETWORK_READY] = BIT(EVENT_NETWORK_DOWN),
+    
+    [STATE_DEVICE_REG_START] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_REG_SUCCESS) | 
+                               BIT(EVENT_REG_FAILURE) | BIT(EVENT_REG_RETRY_NEEDED) | 
+                               BIT(EVENT_TIMEOUT) | BIT(EVENT_RETRY),
+    
+    [STATE_DEVICE_REG_IN_PROGRESS] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_REG_SUCCESS) | 
+                                     BIT(EVENT_REG_FAILURE) | BIT(EVENT_TIMEOUT),
+    
+    [STATE_DEVICE_REG_COMPLETE] = BIT(EVENT_NETWORK_DOWN),
+    
+    [STATE_MQTT_INIT_START] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_MQTT_CONNECTED) | 
+                              BIT(EVENT_MQTT_FAILURE) | BIT(EVENT_TIMEOUT) | BIT(EVENT_RETRY),
+    
+    [STATE_MQTT_CONNECTING] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_MQTT_CONNECTED) | 
+                              BIT(EVENT_MQTT_FAILURE) | BIT(EVENT_MQTT_DISCONNECTED) | 
+                              BIT(EVENT_TIMEOUT),
+    
+    [STATE_OPERATIONAL] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_MQTT_DISCONNECTED),
+    
+    [STATE_ERROR] = BIT(EVENT_RETRY) | BIT(EVENT_NETWORK_UP) | BIT(EVENT_NETWORK_DOWN)
+};
+
+/**
+ * @brief Check if an event is allowed in the current state
+ */
+static bool is_event_allowed(init_state_t state, init_event_t event)
+{
+    if (state >= STATE_MAX || event >= EVENT_MAX) {
+        return false;
+    }
+    return (allowed_events[state] & BIT(event)) != 0;
+}
+
 /* Forward declarations */
 static void state_transition(init_sm_context_t *ctx, init_state_t new_state);
 static void process_event(init_event_t event);
@@ -228,6 +268,14 @@ static void process_event(init_event_t event)
 
     if (event >= EVENT_MAX) {
         LOG_ERR("Invalid event %d", event);
+        k_mutex_unlock(&sm_mutex);
+        return;
+    }
+
+    /* Check if event is allowed in current state */
+    if (!is_event_allowed(sm_context.current_state, event)) {
+        LOG_DBG("Ignoring event %d in state %s - not allowed", 
+                event, state_table[sm_context.current_state].name);
         k_mutex_unlock(&sm_mutex);
         return;
     }

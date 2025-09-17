@@ -272,32 +272,57 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
         return;
     }
     if (mgmt_event == NET_EVENT_L4_CONNECTED) {
+        /* Check if already connected to avoid redundant interface switching */
+        if (net_ctx.connected) {
+            LOG_DBG("Network already connected, ignoring duplicate L4_CONNECTED event");
+            return;
+        }
 
 #if defined(CONFIG_RPR_ETHERNET)
         if (is_ethernet_iface(iface)) {
-            if (ethernet_set_iface_default() == ETHERNET_OK) {
-                net_ctx.status = NET_CONNECT_ETHERNET;
+            /* Only set as default if not already default */
+            if (!is_ethernet_iface_default()) {
+                if (ethernet_set_iface_default() == ETHERNET_OK) {
+                    net_ctx.status = NET_CONNECT_ETHERNET;
+                    LOG_INF("Ethernet interface set as default");
+                } else {
+                    LOG_ERR("Failed to set Ethernet as default interface");
+                }
             } else {
-                LOG_ERR("Failed to set Ethernet as default interface");
+                net_ctx.status = NET_CONNECT_ETHERNET;
+                LOG_DBG("Ethernet already default interface");
             }
         } else
 #endif
 #if defined(CONFIG_RPR_WIFI)
                 if (is_wifi_iface(iface)) {
-            if (wifi_set_iface_default() == WIFI_OK) {
-                net_ctx.status = NET_CONNECT_WIFI;
-
+            /* Only set as default if not already default */
+            if (!is_wifi_iface_default()) {
+                if (wifi_set_iface_default() == WIFI_OK) {
+                    net_ctx.status = NET_CONNECT_WIFI;
+                    LOG_INF("Wi-Fi interface set as default");
+                } else {
+                    LOG_ERR("Failed to set Wi-Fi as default interface");
+                }
             } else {
-                LOG_ERR("Failed to set Wi-Fi as default interface");
+                net_ctx.status = NET_CONNECT_WIFI;
+                LOG_DBG("Wi-Fi already default interface");
             }
         } else
 #endif
 #if defined(CONFIG_RPR_MODEM)
                 if (is_modem_iface(iface)) {
-            if (modem_set_iface_default() == MODEM_SUCCESS) {
-                net_ctx.status = NET_CONNECT_LTE;
+            /* Only set as default if not already default */
+            if (!is_modem_iface_default()) {
+                if (modem_set_iface_default() == MODEM_SUCCESS) {
+                    net_ctx.status = NET_CONNECT_LTE;
+                    LOG_INF("Modem interface set as default");
+                } else {
+                    LOG_ERR("Failed to set Modem as default interface");
+                }
             } else {
-                LOG_ERR("Failed to set Modem as default interface");
+                net_ctx.status = NET_CONNECT_LTE;
+                LOG_DBG("Modem already default interface");
             }
         } else
 #endif
@@ -315,7 +340,12 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
         init_http_log_client();
 #endif
 
-#ifdef CONFIG_RPR_MODULE_MQTT
+#ifdef CONFIG_RPR_MODULE_INIT_SM
+        /* The init state machine handles MQTT initialization and connection.
+         * Domain logic should not interfere with it. */
+        LOG_DBG("MQTT initialization is handled by init state machine");
+#elif defined(CONFIG_RPR_MODULE_MQTT)
+        /* Only handle MQTT directly if init state machine is not being used */
         /* Check if RTC is ready and has valid time before initializing MQTT */
         struct rtc_time current_time;
         int rtc_ret = get_date_time(&current_time);

@@ -39,7 +39,7 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
 {
     mqtt_parsed_message_t parsed_msg;
     int ret;
-    const char *temp_audio_file = "/lfs/mqtt_audio_temp.opus";
+    const char *temp_audio_file = NULL;
     bool audio_in_file = false;
     
     LOG_INF("Processing audio alert on topic '%s' (%zu bytes)", topic, payload_len);
@@ -56,6 +56,16 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
     if (parsed_msg.opus_data_len == 0 && parsed_msg.metadata.opus_data_size > 0) {
         /* Audio data is in file (MQTT module saved it) */
         audio_in_file = true;
+        /* Prefer the last file the MQTT module wrote, fallback to known names */
+        extern char g_mqtt_last_temp_file[];
+        if (g_mqtt_last_temp_file && g_mqtt_last_temp_file[0] != '\0' &&
+            file_manager_exists(g_mqtt_last_temp_file) == 1) {
+            temp_audio_file = g_mqtt_last_temp_file;
+        } else if (file_manager_exists("/lfs/mqtt_audio_1.opus") == 1) {
+            temp_audio_file = "/lfs/mqtt_audio_1.opus";
+        } else {
+            temp_audio_file = "/lfs/mqtt_audio_0.opus";
+        }
         LOG_INF("Audio data stored in file %s, JSON metadata parsed successfully", temp_audio_file);
     }
     

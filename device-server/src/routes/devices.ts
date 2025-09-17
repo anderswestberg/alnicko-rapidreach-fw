@@ -235,5 +235,50 @@ export function createDeviceRoutes(mqttClient: DeviceMqttClient): Router {
     }
   });
 
+  // Query logs stored in MongoDB
+  router.get('/logs', async (req: Request, res: Response) => {
+    try {
+      const { source, level, limit = '100', since } = req.query as Record<string, string>;
+      const col = getCollection('logs');
+      const q: any = {};
+      if (source) q.source = source;
+      if (level) q.level = level;
+      if (since) q.ts = { $gte: new Date(since) };
+
+      const cursor = col.find(q).sort({ ts: -1 }).limit(parseInt(limit, 10) || 100);
+      const items = await cursor.toArray();
+      res.json({ success: true, logs: items });
+    } catch (error) {
+      logger.error('Error fetching logs:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
+  // Ingest a log entry (from web-app or other clients)
+  router.post('/logs', async (req: Request, res: Response) => {
+    try {
+      const { level = 'info', message, device = 'web-app', source, ...rest } = req.body || {};
+      if (!message || typeof message !== 'string') {
+        res.status(400).json({ success: false, error: 'message is required' });
+        return;
+      }
+      const col = getCollection('logs');
+      const doc = {
+        ts: new Date(),
+        timestamp: new Date(), // React Admin expects 'timestamp'
+        level,
+        message,
+        device, // 'device-server', 'web-app', or speaker device ID
+        source, // Module within the device (optional)
+        ...rest,
+      };
+      await col.insertOne(doc);
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Error ingesting log:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
   return router;
 }
