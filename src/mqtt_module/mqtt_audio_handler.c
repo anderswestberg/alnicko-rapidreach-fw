@@ -153,7 +153,7 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                     /* 80-100% maps to 0 to +48 (0 dB to +24 dB) */
                     codec_volume = (parsed_msg.metadata.volume - 80) * 48 / 20;
                 }
-                LOG_INF("Mapping web volume %d%% to codec value %d", 
+                LOG_INF("Audio volume request: %d%%, mapped codec value: %d", 
                         parsed_msg.metadata.volume, codec_volume);
                 if (codec_volume < MINIMUM_CODEC_VOLUME) {
                     codec_volume = MINIMUM_CODEC_VOLUME;
@@ -162,9 +162,16 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
                     codec_volume = MAXIMUM_CODEC_VOLUME;
                 }
                 ret = audio_player_set_volume(codec_volume);
+                if (ret != PLAYER_OK) {
+                    LOG_ERR("audio_player_set_volume failed: %d", ret);
+                }
 #else
                 /* For other codecs, pass volume directly */
+                LOG_INF("Audio volume request: %d%% (direct)", parsed_msg.metadata.volume);
                 ret = audio_player_set_volume(parsed_msg.metadata.volume);
+                if (ret != PLAYER_OK) {
+                    LOG_ERR("audio_player_set_volume failed: %d", ret);
+                }
 #endif
                 if (ret != PLAYER_OK) {
                     LOG_WRN("Failed to set volume: %d", ret);

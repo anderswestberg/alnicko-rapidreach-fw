@@ -131,6 +131,11 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
         originalName: req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
+        volume: params.volume,
+        priority: params.priority,
+        playCount: params.playCount,
+        interruptCurrent: params.interruptCurrent,
+        saveToFile: params.saveToFile,
       });
 
       // Generate output filename
@@ -199,6 +204,7 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
         jsonSize: jsonBuffer.length,
         opusSize: opusData.length,
         totalSize: mqttPayload.length,
+        volume: params.volume,
       });
 
       try {

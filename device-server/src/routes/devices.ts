@@ -262,6 +262,8 @@ export function createDeviceRoutes(mqttClient: DeviceMqttClient): Router {
         res.status(400).json({ success: false, error: 'message is required' });
         return;
       }
+      // Trace ingestion
+      logger.info('Ingesting external log', { device, level, source, messagePreview: message.slice(0, 120) });
       const col = getCollection('logs');
       const doc = {
         ts: new Date(),
@@ -272,8 +274,8 @@ export function createDeviceRoutes(mqttClient: DeviceMqttClient): Router {
         source, // Module within the device (optional)
         ...rest,
       };
-      await col.insertOne(doc);
-      res.json({ success: true });
+      const result = await col.insertOne(doc);
+      res.json({ success: true, id: result.insertedId });
     } catch (error) {
       logger.error('Error ingesting log:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });

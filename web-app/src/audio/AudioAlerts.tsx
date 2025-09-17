@@ -23,6 +23,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { styled } from '@mui/material/styles';
+import { postWebLog } from '../dataProvider';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key';
@@ -117,6 +118,20 @@ export const AudioAlerts = () => {
     formData.append('metadata', JSON.stringify(metadata));
 
     try {
+      // Log intent from web-app
+      await postWebLog('info', 'Sending audio alert', {
+        source: 'AudioAlerts',
+        deviceId: selectedDevice,
+        volume,
+        priority,
+        playCount,
+        interruptCurrent,
+        saveToFile,
+        filename: saveToFile ? filename : undefined,
+        originalName: selectedFile.name,
+        sizeBytes: selectedFile.size,
+      });
+
       // Get auth token
       // const token = localStorage.getItem('auth_token'); // Unused, commented out
       
@@ -136,6 +151,12 @@ export const AudioAlerts = () => {
       // const result = await response.json(); // Unused, commented out
       const deviceName = devices.find(d => (d.clientId || d.id) === selectedDevice)?.clientId || selectedDevice;
       notify(`Audio alert sent to ${deviceName}`, { type: 'success' });
+      // Log success from web-app
+      await postWebLog('info', 'Audio alert sent', {
+        source: 'AudioAlerts',
+        deviceId: selectedDevice,
+        volume,
+      });
       
       // Reset form
       setSelectedFile(null);
@@ -147,6 +168,13 @@ export const AudioAlerts = () => {
       
     } catch (error: any) {
       notify(error.message || 'Failed to send audio alert', { type: 'error' });
+      // Log failure from web-app
+      await postWebLog('error', 'Audio alert failed', {
+        source: 'AudioAlerts',
+        deviceId: selectedDevice,
+        volume,
+        error: error?.message || String(error),
+      });
     } finally {
       setLoading(false);
       setTimeout(() => setUploadProgress(0), 1000);
