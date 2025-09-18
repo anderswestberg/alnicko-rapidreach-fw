@@ -88,19 +88,6 @@ export const Dashboard = () => {
         Device Dashboard
       </Typography>
       
-      <Alert 
-        severity="info" 
-        icon={<BusinessIcon />}
-        sx={{ mb: 3 }}
-      >
-        <Typography variant="body2">
-          <strong>RapidReach Admin</strong> - Powered by React-Admin Enterprise Edition
-        </Typography>
-        <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-          Using Enterprise Admin, Layout, and Navigation components with advanced theming (light/dark mode support)
-        </Typography>
-      </Alert>
-      
       <Grid container spacing={3}>
         {/* Total Devices */}
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>

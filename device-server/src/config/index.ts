@@ -6,8 +6,9 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load environment variables
-dotenv.config({ path: join(__dirname, '../../.env') });
+// Load environment variables (allow override via ENV_FILE)
+const envFile = process.env.ENV_FILE || '.env';
+dotenv.config({ path: join(__dirname, '../../', envFile) });
 
 // Configuration schema
 const configSchema = z.object({

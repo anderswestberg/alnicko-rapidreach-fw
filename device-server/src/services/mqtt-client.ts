@@ -300,8 +300,8 @@ export class DeviceMqttClient extends EventEmitter {
             
             return {
               deviceId: parsed.source || deviceId,
-              device: parsed.source || deviceId,  // Add device field for Source column
-              source: p.module || 'unknown',  // Use module as source instead of deviceId
+              device: parsed.source || deviceId,  // origin
+              module: p.module || 'unknown',  // normalize to module
               level: level,
               levelNo: levelMap[level] || 2, // Default to info (2) if unknown
               message: p.message !== undefined ? p.message : JSON.stringify(p),
@@ -329,8 +329,8 @@ export class DeviceMqttClient extends EventEmitter {
             
             return {
               deviceId,
-              device: deviceId,  // Add device field for Source column
-              source: p.module || 'unknown',  // Use module as source
+              device: deviceId,  // origin
+              module: p.module || 'unknown',  // normalize to module
               level: level,
               levelNo: levelMap[level] || 2,
               message: p.message || JSON.stringify(p),
@@ -355,8 +355,8 @@ export class DeviceMqttClient extends EventEmitter {
           };
           items = [{
             deviceId,
-            device: deviceId,  // Add device field for Source column
-            source: parsed.module || 'unknown',  // Use module as source
+            device: deviceId,  // origin
+            module: parsed.module || 'unknown',  // normalize to module
             level: level,
             levelNo: levelMap[level] || 2,
             message: parsed.message || text,
@@ -368,8 +368,8 @@ export class DeviceMqttClient extends EventEmitter {
         // Not JSON, store as simple text log
         items = [{
           deviceId,
-          device: deviceId,  // Add device field for Source column
-          source: 'unknown',  // No module info in plain text
+          device: deviceId,  // origin
+          module: 'unknown',  // normalize to module
           level: 'info',
           levelNo: 2,  // Info level
           message: text,

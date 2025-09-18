@@ -209,6 +209,25 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
 
       try {
         await mqttClient.publish(topic, mqttPayload);
+        // Also persist a log entry in Mongo for traceability
+        try {
+          const col = (await import('../db/mongo.js')).getCollection('logs');
+          await col.insertOne({
+            timestamp: new Date(),
+            device: 'device-server',
+            source: 'audio',
+            level: 'info',
+            message: 'Audio alert published',
+            deviceId,
+            hwId,
+            volume: params.volume,
+            opusSize: opusData.length,
+            jsonSize: jsonBuffer.length,
+            topic,
+          });
+        } catch (_e) {
+          // Ignore DB errors here; main path already succeeded
+        }
         
         return res.json({
           success: true,

@@ -17,8 +17,8 @@ export async function postWebLog(level: 'info' | 'warn' | 'error', message: stri
     await apiClient.post('/logs', {
       level,
       message,
-      device: 'web-app', // Identifies this as coming from web app
-      source: meta?.source, // Optional module/component within web app
+      device: 'web-app', // origin component
+      module: meta?.module || meta?.source || 'web-app', // normalize to module
       ...meta,
     });
   } catch (e) {

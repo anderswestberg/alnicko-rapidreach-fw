@@ -13,8 +13,8 @@ const mongoSink = winston.format((info) => {
       timestamp: now, // React Admin expects 'timestamp'
       level: info.level,
       message: info.message,
-      device: 'device-server', // Use 'device' for server/web-app distinction
-      source: info.source || info.service || 'device-server', // Module within device
+      device: 'device-server', // origin (host/app)
+      module: info.module || info.source || info.service || 'device-server', // normalize to module
     };
     // Merge extra meta fields
     for (const k of Object.keys(info)) {
