@@ -1,0 +1,1 @@
+export PATH=$HOME/.local/bin:/home/rapidreach/zephyrproject/.venv/bin:$PATH && source env-west.sh && west flash | cat

@@ -178,13 +178,13 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
 
       // Prepare MQTT message with JSON header + Opus data
       const metadata = {
-        opus_data_size: opusData.length,
+        opusDataSize: opusData.length,
         priority: params.priority,
-        save_to_file: params.saveToFile,
+        saveToFile: params.saveToFile,
         filename: params.filename || `alert_${Date.now()}.opus`,
-        play_count: params.playCount,
+        playCount: params.playCount,
         volume: params.volume,
-        interrupt_current: params.interruptCurrent,
+        interruptCurrent: params.interruptCurrent,
       };
 
       const jsonHeader = JSON.stringify(metadata);
@@ -205,6 +205,12 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
         opusSize: opusData.length,
         totalSize: mqttPayload.length,
         volume: params.volume,
+        priority: params.priority,
+        playCount: params.playCount,
+        interruptCurrent: params.interruptCurrent,
+        saveToFile: params.saveToFile,
+        filename: params.filename,
+        originalFile: req.file.originalname,
       });
 
       try {
@@ -217,10 +223,16 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
             device: 'device-server',
             source: 'audio',
             level: 'info',
-            message: 'Audio alert published',
+            message: `Audio alert published - Volume: ${params.volume}%, Priority: ${params.priority}, PlayCount: ${params.playCount}`,
             deviceId,
             hwId,
             volume: params.volume,
+            priority: params.priority,
+            playCount: params.playCount,
+            interruptCurrent: params.interruptCurrent,
+            saveToFile: params.saveToFile,
+            filename: params.filename,
+            originalFile: req.file.originalname,
             opusSize: opusData.length,
             jsonSize: jsonBuffer.length,
             topic,
@@ -335,13 +347,13 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
 
       // Prepare MQTT message
       const metadata = {
-        opus_data_size: opusData.length,
+        opusDataSize: opusData.length,
         priority: params.priority,
-        save_to_file: params.saveToFile,
+        saveToFile: params.saveToFile,
         filename: params.filename || req.file.originalname,
-        play_count: params.playCount,
+        playCount: params.playCount,
         volume: params.volume,
-        interrupt_current: params.interruptCurrent,
+        interruptCurrent: params.interruptCurrent,
       };
 
       const jsonHeader = JSON.stringify(metadata);

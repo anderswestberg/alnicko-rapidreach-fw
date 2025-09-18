@@ -10,6 +10,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/net/mqtt.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/net_ip.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/reboot.h>
 #include <stdio.h>
@@ -128,6 +130,47 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             mqtt_connected = true;
             /* Reset reconnection backoff on successful connection */
             
+            /* Re-establish all subscriptions after reconnect */
+            LOG_INF("Re-establishing subscriptions after reconnect");
+            k_mutex_lock(&subscriptions_mutex, K_FOREVER);
+            int active_count = 0;
+            for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
+                if (subscriptions[i].active) {
+                    active_count++;
+                    LOG_INF("Re-subscribing to stored topic[%d]: '%s'", i, subscriptions[i].topic);
+                    struct mqtt_topic subscribe_topic = {
+                        .topic = {
+                            .utf8 = (uint8_t *)subscriptions[i].topic,
+                            .size = strlen(subscriptions[i].topic)
+                        },
+                        .qos = subscriptions[i].qos
+                    };
+                    
+                    struct mqtt_subscription_list sub_list = {
+                        .list = &subscribe_topic,
+                        .list_count = 1,
+                        .message_id = 3000 + i  /* Use a unique message ID for re-subscription */
+                    };
+                    
+                    int ret = mqtt_subscribe(client, &sub_list);
+                    if (ret < 0) {
+                        LOG_ERR("Failed to re-subscribe to '%s': %d", 
+                                subscriptions[i].topic, ret);
+                    } else {
+                        LOG_INF("Re-subscribed to topic '%s' (msg_id: %d)", 
+                                subscriptions[i].topic, sub_list.message_id);
+                    }
+                }
+            }
+            LOG_INF("Re-subscription complete: %d active subscriptions", active_count);
+            k_mutex_unlock(&subscriptions_mutex);
+            
+            /* Send immediate heartbeat to show device online quickly */
+            if (heartbeat_enabled) {
+                LOG_INF("Sending immediate heartbeat after connection");
+                k_work_schedule(&heartbeat_work, K_NO_WAIT);
+            }
+            
 #ifdef CONFIG_RPR_MODULE_INIT_SM
             /* Notify state machine of successful connection */
             init_state_machine_send_event(EVENT_MQTT_CONNECTED);
@@ -203,7 +246,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         memcpy(topic_buf, pub->message.topic.topic.utf8, topic_len);
         topic_buf[topic_len] = '\0';
         
-        LOG_INF("Received PUBLISH on topic '%s' [%zu bytes]", topic_buf, total_len);
+        LOG_INF("Received PUBLISH on topic '%s' [%zu bytes] msg_id=%u", topic_buf, total_len, pub->message_id);
         
         /* Send PUBACK immediately for QoS 1 messages to avoid broker timeout */
         if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
@@ -595,7 +638,7 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
         if (mqtt_connected) {
             /* Process incoming MQTT packets */
             ret = mqtt_input(&client);
-            if (ret < 0) {
+            if (ret < 0 && ret != -EAGAIN) {
                 if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EPIPE) {
                     LOG_ERR("MQTT connection lost in mqtt_input: %d (time: %lld)", ret, current_time);
                     LOG_ERR("Connection lost reason: ENOTCONN=%d, ECONNRESET=%d, EPIPE=%d", 
@@ -680,8 +723,8 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
             }
         }
         
-        /* Sleep for a short time to avoid busy waiting */
-        k_sleep(K_MSEC(50));  /* Reduced from 100ms for better responsiveness */
+        /* Sleep for a very short time to avoid busy waiting and ensure we don't miss messages */
+        k_sleep(K_MSEC(10));  /* Reduced to 10ms for better message reception */
     }
     
     LOG_INF("MQTT maintenance thread stopped");
@@ -693,30 +736,62 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
 static void heartbeat_work_handler(struct k_work *work)
 {
     static uint32_t sequence_number = 0;
-    char payload[64];
+    char payload[256];
     int ret;
+    char ip_addr[NET_IPV4_ADDR_LEN] = "0.0.0.0";
 
     if (!mqtt_connected) {
         LOG_WRN("MQTT not connected, skipping heartbeat");
         goto reschedule;
     }
 
-    /* Create heartbeat payload with timestamp and sequence */
+    /* Get current IP address */
+#ifdef CONFIG_RPR_ETHERNET
+    struct net_if *iface = net_if_get_default();
+    if (iface) {
+        const struct net_if_config *cfg = net_if_get_config(iface);
+        if (cfg && cfg->ip.ipv4) {
+            net_addr_ntop(AF_INET, &cfg->ip.ipv4->unicast[0].ipv4.address.in_addr, 
+                         ip_addr, sizeof(ip_addr));
+        }
+    }
+#endif
+
+    /* Get device info */
+    size_t len = 0;
+    const char *fw_ver = dev_info_get_fw_version_str(&len);
+    const char *device_id = dev_info_get_device_id_str(&len);
+    uint32_t uptime_sec = k_uptime_get_32() / 1000;
+
+    /* Create heartbeat payload with full device info */
     ret = snprintf(payload, sizeof(payload), 
-                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu}",
-                   sequence_number++, k_uptime_get());
+                   "{\"alive\":true,\"seq\":%u,\"uptime\":%u,"
+                   "\"version\":\"%s\",\"ip\":\"%s\",\"hwId\":\"%s\"}",
+                   sequence_number++, uptime_sec,
+                   fw_ver ? fw_ver : "unknown",
+                   ip_addr,
+                   device_id ? device_id : "unknown");
     
     if (ret < 0 || ret >= sizeof(payload)) {
         LOG_ERR("Failed to create heartbeat payload");
         goto reschedule;
     }
 
+    /* Create heartbeat topic with client ID */
+    char topic[64];
+    ret = snprintf(topic, sizeof(topic), "%s/%s", 
+                   CONFIG_RPR_MQTT_HEARTBEAT_TOPIC, client_id_buffer);
+    if (ret < 0 || ret >= sizeof(topic)) {
+        LOG_ERR("Failed to create heartbeat topic");
+        goto reschedule;
+    }
+
     /* Publish heartbeat message */
-    ret = mqtt_send_heartbeat();
+    ret = mqtt_module_publish(topic, payload, strlen(payload));
     if (ret != MQTT_SUCCESS) {
-        LOG_WRN("Failed to send heartbeat: %d", ret);
+        LOG_WRN("Failed to publish heartbeat: %d", ret);
     } else {
-        LOG_DBG("Heartbeat sent: %s", payload);
+        LOG_INF("Published heartbeat to %s: %s", topic, payload);
     }
 
 reschedule:
@@ -953,14 +1028,7 @@ int mqtt_init(void)
         LOG_INF("Audio work queue initialized");
     }
 
-    /* Start MQTT maintenance thread */
-    mqtt_thread_running = true;
-    mqtt_thread_id = k_thread_create(&mqtt_thread, mqtt_thread_stack,
-                                     K_THREAD_STACK_SIZEOF(mqtt_thread_stack),
-                                     mqtt_thread_func, NULL, NULL, NULL,
-                                     K_PRIO_COOP(7), 0, K_NO_WAIT);
-    k_thread_name_set(mqtt_thread_id, "mqtt_maintenance");
-
+    /* Don't start the maintenance thread yet - wait for explicit connect */
     mqtt_initialized = true;
     LOG_INF("MQTT module initialized successfully");
 
@@ -970,7 +1038,7 @@ int mqtt_init(void)
 mqtt_status_t mqtt_module_connect(void)
 {
     int ret;
-
+    
     if (!mqtt_initialized) {
         LOG_ERR("MQTT module not initialized");
         return MQTT_ERR_NOT_INITIALIZED;
@@ -979,6 +1047,20 @@ mqtt_status_t mqtt_module_connect(void)
     if (mqtt_connected) {
         LOG_INF("MQTT already connected");
         return MQTT_SUCCESS;
+    }
+
+    /* Start MQTT maintenance thread if not already running */
+    if (!mqtt_thread_running) {
+        /* Set last reconnect attempt to current time to prevent immediate auto-reconnect */
+        last_reconnect_attempt = k_uptime_get();
+        
+        mqtt_thread_running = true;
+        mqtt_thread_id = k_thread_create(&mqtt_thread, mqtt_thread_stack,
+                                         K_THREAD_STACK_SIZEOF(mqtt_thread_stack),
+                                         mqtt_thread_func, NULL, NULL, NULL,
+                                         K_PRIO_COOP(7), 0, K_NO_WAIT);
+        k_thread_name_set(mqtt_thread_id, "mqtt_maintenance");
+        LOG_INF("MQTT maintenance thread started");
     }
 
     /* Don't enable auto-reconnection here - let user enable it after successful connection */
@@ -1069,12 +1151,14 @@ mqtt_status_t mqtt_module_publish(const char *topic, const char *payload, size_t
     }
 
     /* Configure publish parameters */
+    static uint16_t message_id_counter = 1;
     param.message.topic.qos = MQTT_QOS_1_AT_LEAST_ONCE;
     param.message.topic.topic.utf8 = (uint8_t *)topic;
     param.message.topic.topic.size = strlen(topic);
     param.message.payload.data = (uint8_t *)payload;
     param.message.payload.len = payload_len;
-    param.message_id = 1; /* Static for simplicity */
+    param.message_id = message_id_counter++; /* Unique message ID for each publish */
+    if (message_id_counter == 0) message_id_counter = 1; /* Avoid 0 */
     param.dup_flag = 0;
     param.retain_flag = 0;
 
@@ -1093,38 +1177,10 @@ mqtt_status_t mqtt_module_publish(const char *topic, const char *payload, size_t
 
 mqtt_status_t mqtt_send_heartbeat(void)
 {
-    static uint32_t sequence_number = 0;
-    char payload[128];
-    char topic[64];
-    int ret;
-
-    if (!mqtt_connected) {
-        return MQTT_ERR_CONNECTION_FAILED;
-    }
-
-    /* Create heartbeat topic with client ID */
-    ret = snprintf(topic, sizeof(topic), "%s/%s", 
-                   CONFIG_RPR_MQTT_HEARTBEAT_TOPIC, client_id_buffer);
-    if (ret < 0 || ret >= sizeof(topic)) {
-        LOG_ERR("Failed to create heartbeat topic");
-        return MQTT_ERR_PUBLISH_FAILED;
-    }
-
-    /* Create heartbeat payload with device info */
-    size_t hw_id_len;
-    const char *hw_device_id = dev_info_get_device_id_str(&hw_id_len);
-    ret = snprintf(payload, sizeof(payload), 
-                   "{\"alive\":true,\"seq\":%u,\"uptime\":%llu,\"deviceId\":\"%s\",\"hwId\":\"%s\",\"version\":\"%s\"}",
-                   sequence_number++, k_uptime_get() / 1000, /* Convert to seconds */
-                   client_id_buffer, hw_device_id ? hw_device_id : "", "1.0.0");
-    
-    if (ret < 0 || ret >= sizeof(payload)) {
-        LOG_ERR("Failed to create heartbeat payload");
-        return MQTT_ERR_PUBLISH_FAILED;
-    }
-
-    LOG_DBG("Publishing heartbeat to %s: %s", topic, payload);
-    return mqtt_module_publish(topic, payload, strlen(payload));
+    /* Heartbeat is now fully handled by heartbeat_work_handler */
+    /* This function is kept for backward compatibility but should not be called directly */
+    LOG_WRN("mqtt_send_heartbeat() called directly - heartbeat should be managed by work handler");
+    return MQTT_SUCCESS;
 }
 
 bool mqtt_is_connected(void)
@@ -1191,10 +1247,6 @@ mqtt_status_t mqtt_module_subscribe(const char *topic, uint8_t qos, mqtt_message
         return MQTT_ERR_NOT_INITIALIZED;
     }
     
-    if (!mqtt_connected) {
-        return MQTT_ERR_CONNECTION_FAILED;
-    }
-    
     if (!topic || !handler) {
         return MQTT_ERR_INVALID_PARAM;
     }
@@ -1215,7 +1267,7 @@ mqtt_status_t mqtt_module_subscribe(const char *topic, uint8_t qos, mqtt_message
         return MQTT_ERR_SUBSCRIBE_FAILED;
     }
     
-    /* Store subscription info */
+    /* Store subscription info (even if not connected - will subscribe on connect) */
     strncpy(subscriptions[slot].topic, topic, sizeof(subscriptions[slot].topic) - 1);
     subscriptions[slot].topic[sizeof(subscriptions[slot].topic) - 1] = '\0';
     subscriptions[slot].handler = handler;
@@ -1238,18 +1290,19 @@ mqtt_status_t mqtt_module_subscribe(const char *topic, uint8_t qos, mqtt_message
         .message_id = 1000 + slot  /* Use slot as part of message ID */
     };
     
-    int ret = mqtt_subscribe(&client, &sub_list);
-    if (ret != 0) {
-        /* Clean up on failure */
-        k_mutex_lock(&subscriptions_mutex, K_FOREVER);
-        subscriptions[slot].active = false;
-        k_mutex_unlock(&subscriptions_mutex);
-        
-        LOG_ERR("Failed to subscribe to topic '%s': %d", topic, ret);
-        return MQTT_ERR_SUBSCRIBE_FAILED;
+    /* Only try to subscribe if connected */
+    if (mqtt_connected) {
+        int ret = mqtt_subscribe(&client, &sub_list);
+        if (ret != 0) {
+            /* Don't clean up - keep subscription for retry on reconnect */
+            LOG_WRN("Failed to subscribe to topic '%s' now (err: %d), will retry on reconnect", topic, ret);
+            return MQTT_ERR_SUBSCRIBE_FAILED;
+        }
+        LOG_INF("Subscribed to topic '%s' with QoS %d", topic, qos);
+    } else {
+        LOG_INF("Stored subscription to topic '%s' for later (not connected yet)", topic);
     }
     
-    LOG_INF("Subscribed to topic '%s' with QoS %d", topic, qos);
     return MQTT_SUCCESS;
 }
 

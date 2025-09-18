@@ -15,10 +15,15 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/net_ip.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+LOG_MODULE_REGISTER(cli_module, LOG_LEVEL_INF);
 
 #include "battery.h"
 #include "charger.h"
@@ -2896,6 +2901,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
  */
 static int cmd_device_info(const struct shell *sh, size_t argc, char **argv)
 {
+    LOG_INF("Device info command received");
+    
     size_t      len    = 0;
     const char *fw_ver = dev_info_get_fw_version_str(&len);
 
@@ -2924,6 +2931,31 @@ static int cmd_device_info(const struct shell *sh, size_t argc, char **argv)
     } else {
         shell_error(sh, "Failed to retrieve device id.");
     }
+    
+    /* Add uptime */
+    uint32_t uptime_ms = k_uptime_get_32();
+    uint32_t uptime_sec = uptime_ms / 1000;
+    uint32_t hours = uptime_sec / 3600;
+    uint32_t minutes = (uptime_sec % 3600) / 60;
+    uint32_t seconds = uptime_sec % 60;
+    shell_print(sh, "Uptime: %02u:%02u:%02u", hours, minutes, seconds);
+    
+    /* Add IP address - check different interfaces */
+    struct net_if *iface;
+    const struct net_if_config *cfg;
+    
+#ifdef CONFIG_RPR_ETHERNET
+    iface = net_if_get_default();
+    if (iface) {
+        cfg = net_if_get_config(iface);
+        if (cfg && cfg->ip.ipv4) {
+            char addr_str[NET_IPV4_ADDR_LEN];
+            net_addr_ntop(AF_INET, &cfg->ip.ipv4->unicast[0].ipv4.address.in_addr, 
+                         addr_str, sizeof(addr_str));
+            shell_print(sh, "IP Address: %s", addr_str);
+        }
+    }
+#endif
 
     return 0;
 }

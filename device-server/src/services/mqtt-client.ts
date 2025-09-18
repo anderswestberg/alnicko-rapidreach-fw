@@ -24,7 +24,7 @@ export class DeviceMqttClient extends EventEmitter {
     timeout: NodeJS.Timeout;
   }> = new Map();
   private deviceTimeoutInterval: NodeJS.Timeout | null = null;
-  private readonly DEVICE_TIMEOUT_MS = 60000; // Consider device offline after 60 seconds
+  private readonly DEVICE_TIMEOUT_MS = 90000; // Consider device offline after 90 seconds (3 missed heartbeats)
   // Log batching
   private logBuffers: Map<string, any[]> = new Map();
   private logFlushTimers: Map<string, NodeJS.Timeout> = new Map();

@@ -87,7 +87,8 @@ export const AudioAlerts = () => {
       }
       
       setSelectedFile(file);
-      if (saveToFile && !filename) {
+      // Always update filename when saveToFile is enabled and selecting a new file
+      if (saveToFile) {
         setFilename(file.name.replace(/\.[^/.]+$/, '.opus'));
       }
     }
@@ -152,19 +153,22 @@ export const AudioAlerts = () => {
       const deviceName = devices.find(d => (d.clientId || d.id) === selectedDevice)?.clientId || selectedDevice;
       notify(`Audio alert sent to ${deviceName}`, { type: 'success' });
       // Log success from web-app
-      await postWebLog('info', 'Audio alert sent', {
+      await postWebLog('info', 'Audio alert sent successfully', {
         source: 'AudioAlerts',
         deviceId: selectedDevice,
+        deviceName,
         volume,
+        priority,
+        playCount,
+        interruptCurrent,
+        saveToFile,
+        filename: saveToFile ? filename : undefined,
+        originalName: selectedFile.name,
+        sizeBytes: selectedFile.size,
       });
       
-      // Reset form
-      setSelectedFile(null);
+      // Don't reset the selected file - keep it for potential re-use
       setUploadProgress(100);
-      
-      // Reset file input
-      const fileInput = document.getElementById('audio-file-input') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
       
     } catch (error: any) {
       notify(error.message || 'Failed to send audio alert', { type: 'error' });
@@ -228,7 +232,12 @@ export const AudioAlerts = () => {
                   <Box sx={{ mt: 1 }}>
                     <Chip 
                       label={`${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`}
-                      onDelete={() => setSelectedFile(null)}
+                      onDelete={() => {
+                        setSelectedFile(null);
+                        // Also reset the file input when manually clearing
+                        const fileInput = document.getElementById('audio-file-input') as HTMLInputElement;
+                        if (fileInput) fileInput.value = '';
+                      }}
                       color="primary"
                     />
                   </Box>
@@ -296,7 +305,18 @@ export const AudioAlerts = () => {
                   control={
                     <Checkbox
                       checked={saveToFile}
-                      onChange={(e) => setSaveToFile(e.target.checked)}
+                      onChange={(e) => {
+                        setSaveToFile(e.target.checked);
+                        if (e.target.checked) {
+                          // Set default filename when enabling save to file
+                          if (selectedFile) {
+                            setFilename(selectedFile.name.replace(/\.[^/.]+$/, '.opus'));
+                          }
+                        } else {
+                          // Clear filename when disabling save to file
+                          setFilename('');
+                        }
+                      }}
                     />
                   }
                   label="Save to device storage"

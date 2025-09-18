@@ -46,6 +46,8 @@ static const uint32_t allowed_events[STATE_MAX] = {
     
     [STATE_NETWORK_READY] = BIT(EVENT_NETWORK_DOWN),
     
+    [STATE_NETWORK_STABILIZE] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_TIMEOUT),
+    
     [STATE_DEVICE_REG_START] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_REG_SUCCESS) | 
                                BIT(EVENT_REG_FAILURE) | BIT(EVENT_REG_RETRY_NEEDED) | 
                                BIT(EVENT_TIMEOUT) | BIT(EVENT_RETRY),
@@ -86,6 +88,7 @@ static void process_event(init_event_t event);
 static void state_init_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_wait_network_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_network_ready_handler(init_sm_context_t *ctx, init_event_t event);
+static void state_network_stabilize_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_start_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_in_progress_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_complete_handler(init_sm_context_t *ctx, init_event_t event);
@@ -98,6 +101,7 @@ static void state_error_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_init_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_wait_network_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_network_ready_entry(init_sm_context_t *ctx, init_event_t event);
+static void state_network_stabilize_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_start_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_in_progress_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_complete_entry(init_sm_context_t *ctx, init_event_t event);
@@ -128,6 +132,12 @@ static const state_info_t state_table[STATE_MAX] = {
         .entry = state_network_ready_entry,
         .exit = state_common_exit,
         .handler = state_network_ready_handler
+    },
+    [STATE_NETWORK_STABILIZE] = {
+        .name = "NETWORK_STABILIZE",
+        .entry = state_network_stabilize_entry,
+        .exit = state_common_exit,
+        .handler = state_network_stabilize_handler
     },
     [STATE_DEVICE_REG_START] = {
         .name = "DEVICE_REG_START",
@@ -322,28 +332,17 @@ static void state_network_ready_entry(init_sm_context_t *ctx, init_event_t event
     LOG_INF("Entering NETWORK_READY state - network is available");
     ctx->network_available = true;
     
-    /* Automatically proceed to next state */
-#ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
-    state_transition(ctx, STATE_DEVICE_REG_START);
-#else
-    /* Skip device registration if not configured */
-    LOG_INF("Device registry not enabled, skipping to MQTT");
+    /* Transition to network stabilization delay state */
+    LOG_INF("Transitioning to NETWORK_STABILIZE state for network stabilization");
+    state_transition(ctx, STATE_NETWORK_STABILIZE);
+}
+
+static void state_network_stabilize_entry(init_sm_context_t *ctx, init_event_t event)
+{
+    LOG_INF("Entering NETWORK_STABILIZE state - waiting 15 seconds for network and shell MQTT to stabilize");
     
-    /* Use the first 6 characters of hardware device ID as fallback */
-    size_t device_id_len;
-    const char *full_device_id = dev_info_get_device_id_str(&device_id_len);
-    if (full_device_id && device_id_len >= 6) {
-        strncpy(ctx->device_id, full_device_id, 6);
-        ctx->device_id[6] = '\0';
-        LOG_INF("Using fallback device ID: %s", ctx->device_id);
-    } else {
-        LOG_ERR("Failed to get device ID, using default");
-        strncpy(ctx->device_id, "000000", sizeof(ctx->device_id) - 1);
-    }
-    ctx->device_registered = false;
-    
-    state_transition(ctx, STATE_MQTT_INIT_START);
-#endif
+    /* Start a 15 second timeout to let shell MQTT connect first */
+    k_work_schedule(&ctx->timeout_work, K_SECONDS(15));
 }
 
 static void state_device_reg_start_entry(init_sm_context_t *ctx, init_event_t event)
@@ -492,6 +491,47 @@ static void state_network_ready_handler(init_sm_context_t *ctx, init_event_t eve
     }
 }
 
+static void state_network_stabilize_handler(init_sm_context_t *ctx, init_event_t event)
+{
+    switch (event) {
+    case EVENT_TIMEOUT:
+        LOG_INF("Network stabilization delay complete, proceeding to next stage");
+        
+        /* Now proceed to device registration or MQTT */
+#ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
+        state_transition(ctx, STATE_DEVICE_REG_START);
+#else
+        /* Skip device registration if not configured */
+        LOG_INF("Device registry not enabled, proceeding to MQTT");
+        
+        /* Use the first 6 characters of hardware device ID as fallback */
+        size_t device_id_len;
+        const char *full_device_id = dev_info_get_device_id_str(&device_id_len);
+        if (full_device_id && device_id_len >= 6) {
+            strncpy(ctx->device_id, full_device_id, 6);
+            ctx->device_id[6] = '\0';
+            LOG_INF("Using fallback device ID: %s", ctx->device_id);
+        } else {
+            LOG_ERR("Failed to get device ID, using default");
+            strncpy(ctx->device_id, "000000", sizeof(ctx->device_id) - 1);
+        }
+        ctx->device_registered = false;
+        
+        state_transition(ctx, STATE_MQTT_INIT_START);
+#endif
+        break;
+        
+    case EVENT_NETWORK_DOWN:
+        LOG_WRN("Network lost during stabilization delay");
+        state_transition(ctx, STATE_WAIT_NETWORK);
+        break;
+        
+    default:
+        LOG_DBG("Event %d in NETWORK_STABILIZE state", event);
+        break;
+    }
+}
+
 static void state_device_reg_start_handler(init_sm_context_t *ctx, init_event_t event)
 {
 #ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
@@ -589,8 +629,8 @@ static void state_mqtt_init_start_handler(init_sm_context_t *ctx, init_event_t e
 
     /* Handle MQTT connected event if it arrives quickly */
     if (event == EVENT_MQTT_CONNECTED) {
-        LOG_INF("MQTT connected quickly, transitioning to operational state");
-        state_transition(ctx, STATE_OPERATIONAL);
+        /* Ignore early MQTT connected events - wait for proper initialization */
+        LOG_WRN("Ignoring early MQTT connected event, waiting for proper initialization");
         return;
     }
     

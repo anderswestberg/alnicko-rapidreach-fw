@@ -23,6 +23,7 @@ typedef enum {
     STATE_INIT = 0,                  /**< Initial state after boot */
     STATE_WAIT_NETWORK,              /**< Waiting for network connectivity */
     STATE_NETWORK_READY,             /**< Network available, ready to proceed */
+    STATE_NETWORK_STABILIZE,         /**< Delay state to let network stabilize */
     STATE_DEVICE_REG_START,          /**< Starting device registration */
     STATE_DEVICE_REG_IN_PROGRESS,    /**< Registration in progress */
     STATE_DEVICE_REG_COMPLETE,       /**< Registration complete (success or fallback) */

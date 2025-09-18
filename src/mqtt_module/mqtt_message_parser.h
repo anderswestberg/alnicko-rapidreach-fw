@@ -62,6 +62,17 @@ int mqtt_parse_message(const uint8_t *payload, size_t payload_len,
                       mqtt_parsed_message_t *parsed_msg);
 
 /**
+ * @brief Parse JSON-only metadata (for pre-extracted JSON from chunked messages)
+ * 
+ * @param json_str Null-terminated JSON string
+ * @param json_len Length of the JSON string
+ * @param parsed_msg Output structure to store parsed data
+ * @return MQTT_PARSER_SUCCESS on success, error code otherwise
+ */
+int mqtt_parse_json_only(const char *json_str, size_t json_len,
+                        mqtt_parsed_message_t *parsed_msg);
+
+/**
  * @brief Validate JSON header format and required fields
  * 
  * @param json_str JSON string to validate

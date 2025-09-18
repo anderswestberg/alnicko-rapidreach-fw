@@ -18,10 +18,13 @@ import {
   Chip,
   Paper,
   CircularProgress,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { dataProvider } from '../dataProvider';
 import SendIcon from '@mui/icons-material/Send';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 const DeviceStatus = () => {
   const record = useRecordContext();
@@ -33,20 +36,86 @@ const DeviceStatus = () => {
 
 const DeviceMetadata = () => {
   const record = useRecordContext();
-  if (!record || !record.metadata) return null;
+  const notify = useNotify();
+  const refresh = useRefresh();
+  const [loading, setLoading] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<any>(null);
+  
+  if (!record) return null;
+  
+  const refreshDeviceInfo = async () => {
+    if (record.status !== 'online') {
+      notify('Device must be online to refresh info', { type: 'warning' });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Execute the device info command
+      const result = await dataProvider.update('devices', {
+        id: record.id,
+        data: { command: 'app info' },
+        previousData: record,
+      });
+      
+      // Parse the output
+      const output = result.data.output || '';
+      const lines = output.split('\n');
+      const info: any = {};
+      
+      lines.forEach((line: string) => {
+        if (line.includes('Firmware version:')) {
+          info.firmwareVersion = line.split(':')[1]?.trim();
+        } else if (line.includes('Hardware version:')) {
+          info.hardwareVersion = line.split(':')[1]?.trim();
+        } else if (line.includes('Board name:')) {
+          info.boardName = line.split(':')[1]?.trim();
+        } else if (line.includes('Device ID:')) {
+          info.deviceId = line.split(':')[1]?.trim();
+        } else if (line.includes('Uptime:')) {
+          info.uptime = line.split(':', 2)[1]?.trim();
+        } else if (line.includes('IP Address:')) {
+          info.ipAddress = line.split(':')[1]?.trim();
+        }
+      });
+      
+      setDeviceInfo(info);
+      notify('Device info refreshed', { type: 'success' });
+      refresh(); // Also refresh the main record
+    } catch (error: any) {
+      const message = error.response?.data?.error || error.message || 'Failed to refresh device info';
+      notify(message, { type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Use either fresh data or metadata from record
+  const displayInfo = deviceInfo || record.metadata || {};
   
   return (
     <Box sx={{ mt: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        Device Information
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+        <Typography variant="h6">
+          Device Information
+        </Typography>
+        <Tooltip title="Refresh device info">
+          <IconButton 
+            onClick={refreshDeviceInfo} 
+            disabled={loading || record.status !== 'online'}
+            size="small"
+          >
+            {loading ? <CircularProgress size={20} /> : <RefreshIcon />}
+          </IconButton>
+        </Tooltip>
+      </Box>
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, sm: 6 }}>
           <Typography variant="body2" color="textSecondary">
             Client ID
           </Typography>
           <Typography variant="body1">
-            {record.metadata.clientId || '-'}
+            {record.metadata?.clientId || displayInfo.clientId || '-'}
           </Typography>
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
@@ -54,7 +123,7 @@ const DeviceMetadata = () => {
             IP Address
           </Typography>
           <Typography variant="body1">
-            {record.metadata.ipAddress || '-'}
+            {displayInfo.ipAddress || '-'}
           </Typography>
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
@@ -62,7 +131,7 @@ const DeviceMetadata = () => {
             Firmware Version
           </Typography>
           <Typography variant="body1">
-            {record.metadata.firmwareVersion || '-'}
+            {displayInfo.firmwareVersion || '-'}
           </Typography>
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
@@ -70,11 +139,32 @@ const DeviceMetadata = () => {
             Uptime
           </Typography>
           <Typography variant="body1">
-            {record.metadata.uptime 
+            {displayInfo.uptime || 
+             (record.metadata?.uptime 
               ? `${Math.floor(record.metadata.uptime / 3600)}h ${Math.floor((record.metadata.uptime % 3600) / 60)}m`
-              : '-'}
+              : '-')}
           </Typography>
         </Grid>
+        {displayInfo.hardwareVersion && (
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <Typography variant="body2" color="textSecondary">
+              Hardware Version
+            </Typography>
+            <Typography variant="body1">
+              {displayInfo.hardwareVersion}
+            </Typography>
+          </Grid>
+        )}
+        {displayInfo.boardName && (
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <Typography variant="body2" color="textSecondary">
+              Board Name
+            </Typography>
+            <Typography variant="body1">
+              {displayInfo.boardName}
+            </Typography>
+          </Grid>
+        )}
       </Grid>
     </Box>
   );
@@ -86,8 +176,34 @@ const CommandExecutor = () => {
   const notify = useNotify();
   const [command, setCommand] = useState('');
   const [commandHistory, setCommandHistory] = useState<Array<{command: string, output: string, timestamp: Date}>>([]);
+  const [commandList, setCommandList] = useState<string[]>([]); // List of executed commands for history
+  const [historyIndex, setHistoryIndex] = useState(-1); // Current position in command history
   const [loading, setLoading] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
+  
+  // Load command history from localStorage on mount
+  useEffect(() => {
+    if (record) {
+      const savedHistory = localStorage.getItem(`deviceCommandHistory_${record.id}`);
+      if (savedHistory) {
+        try {
+          const parsed = JSON.parse(savedHistory);
+          setCommandList(parsed);
+        } catch (e) {
+          console.error('Failed to parse saved command history:', e);
+        }
+      }
+    }
+  }, [record?.id]);
+  
+  // Save command history to localStorage when it changes
+  useEffect(() => {
+    if (record && commandList.length > 0) {
+      // Keep only the last 50 commands
+      const historyToSave = commandList.slice(-50);
+      localStorage.setItem(`deviceCommandHistory_${record.id}`, JSON.stringify(historyToSave));
+    }
+  }, [commandList, record?.id]);
   
   if (!record || record.status !== 'online') {
     return (
@@ -123,6 +239,13 @@ const CommandExecutor = () => {
         timestamp: new Date()
       }]);
       
+      // Add to command list for arrow key navigation (avoid duplicates)
+      setCommandList(prev => {
+        const filtered = prev.filter(cmd => cmd !== currentCommand);
+        return [...filtered, currentCommand];
+      });
+      setHistoryIndex(-1); // Reset history navigation
+      
       notify('Command executed successfully', { type: 'success' });
       refresh();
       
@@ -140,6 +263,13 @@ const CommandExecutor = () => {
         output: `Error: ${message}`,
         timestamp: new Date()
       }]);
+      
+      // Still add to command list even on error (avoid duplicates)
+      setCommandList(prev => {
+        const filtered = prev.filter(cmd => cmd !== currentCommand);
+        return [...filtered, currentCommand];
+      });
+      setHistoryIndex(-1);
     } finally {
       setLoading(false);
     }
@@ -149,6 +279,31 @@ const CommandExecutor = () => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       executeCommand();
+    }
+  };
+  
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (commandList.length > 0) {
+        const newIndex = historyIndex === -1 
+          ? commandList.length - 1 
+          : Math.max(0, historyIndex - 1);
+        setHistoryIndex(newIndex);
+        setCommand(commandList[newIndex]);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex !== -1) {
+        const newIndex = historyIndex + 1;
+        if (newIndex >= commandList.length) {
+          setHistoryIndex(-1);
+          setCommand('');
+        } else {
+          setHistoryIndex(newIndex);
+          setCommand(commandList[newIndex]);
+        }
+      }
     }
   };
   
@@ -201,10 +356,11 @@ const CommandExecutor = () => {
         <MuiTextField
           fullWidth
           variant="outlined"
-          placeholder="Enter command (e.g., device id, help)"
+          placeholder="Enter command (e.g., device id, help) - Use ↑/↓ for history"
           value={command}
           onChange={(e) => setCommand(e.target.value)}
           onKeyPress={handleKeyPress}
+          onKeyDown={handleKeyDown}
           disabled={loading}
           sx={{
             '& .MuiOutlinedInput-root': {

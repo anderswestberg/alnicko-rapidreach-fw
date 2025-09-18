@@ -14,12 +14,43 @@ LOG_MODULE_REGISTER(mqtt_parser, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
 /* JSON parsing descriptors for Zephyr's JSON library */
 static const struct json_obj_descr metadata_descr[] = {
-    JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, opus_data_size, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, priority, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_ARRAY(mqtt_message_metadata_t, filename, 64, filename, JSON_TOK_STRING),
-    JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, play_count, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(mqtt_message_metadata_t, volume, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "opusDataSize", opus_data_size, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "priority", priority, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "saveToFile", save_to_file, JSON_TOK_TRUE),
+    JSON_OBJ_DESCR_ARRAY_NAMED(mqtt_message_metadata_t, "filename", filename, 64, filename, JSON_TOK_STRING),
+    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "playCount", play_count, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "volume", volume, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "interruptCurrent", interrupt_current, JSON_TOK_TRUE),
 };
+
+int mqtt_parse_json_only(const char *json_str, size_t json_len,
+                        mqtt_parsed_message_t *parsed_msg)
+{
+    if (!json_str || !parsed_msg || json_len == 0) {
+        LOG_ERR("Invalid parameters");
+        return MQTT_PARSER_ERR_INVALID_PARAM;
+    }
+    
+    /* Clear output structure */
+    memset(parsed_msg, 0, sizeof(mqtt_parsed_message_t));
+    
+    /* Parse JSON metadata directly */
+    int ret = mqtt_parse_json_metadata(json_str, &parsed_msg->metadata);
+    if (ret < 0) {
+        LOG_ERR("Failed to parse JSON metadata: %d", ret);
+        return ret;
+    }
+    
+    /* Store JSON header size */
+    parsed_msg->metadata.json_header_size = json_len;
+    
+    /* For JSON-only messages, opus data is stored in file */
+    parsed_msg->opus_data = NULL;
+    parsed_msg->opus_data_len = 0;
+    parsed_msg->valid = true;
+    
+    return MQTT_PARSER_SUCCESS;
+}
 
 int mqtt_parse_message(const uint8_t *payload, size_t payload_len, 
                       mqtt_parsed_message_t *parsed_msg)
@@ -177,7 +208,7 @@ int mqtt_parse_json_metadata(const char *json_str,
         LOG_ERR("JSON parsing failed: %d", ret);
         
         /* Try manual parsing for required fields at minimum */
-        char *size_str = strstr(json_str, "\"opus_data_size\"");
+        char *size_str = strstr(json_str, "\"opusDataSize\"");
         if (size_str) {
             size_str = strchr(size_str, ':');
             if (size_str) {
@@ -185,8 +216,60 @@ int mqtt_parse_json_metadata(const char *json_str,
             }
         }
         
+        /* Parse volume manually */
+        char *vol_str = strstr(json_str, "\"volume\"");
+        if (vol_str) {
+            vol_str = strchr(vol_str, ':');
+            if (vol_str) {
+                metadata->volume = strtoul(vol_str + 1, NULL, 10);
+                if (metadata->volume > 100) {
+                    metadata->volume = 100;
+                }
+            }
+        }
+        
+        /* Parse priority manually */
+        char *pri_str = strstr(json_str, "\"priority\"");
+        if (pri_str) {
+            pri_str = strchr(pri_str, ':');
+            if (pri_str) {
+                metadata->priority = strtoul(pri_str + 1, NULL, 10);
+            }
+        }
+        
+        /* Parse playCount manually */
+        char *count_str = strstr(json_str, "\"playCount\"");
+        if (count_str) {
+            count_str = strchr(count_str, ':');
+            if (count_str) {
+                metadata->play_count = strtoul(count_str + 1, NULL, 10);
+            }
+        }
+        
+        /* Parse filename manually */
+        char *filename_str = strstr(json_str, "\"filename\"");
+        if (filename_str) {
+            filename_str = strchr(filename_str, ':');
+            if (filename_str) {
+                /* Skip whitespace and quote */
+                filename_str++;
+                while (*filename_str == ' ' || *filename_str == '"') filename_str++;
+                
+                /* Find end quote */
+                char *end_quote = strchr(filename_str, '"');
+                if (end_quote) {
+                    size_t len = end_quote - filename_str;
+                    if (len > sizeof(metadata->filename) - 1) {
+                        len = sizeof(metadata->filename) - 1;
+                    }
+                    memcpy(metadata->filename, filename_str, len);
+                    metadata->filename[len] = '\0';
+                }
+            }
+        }
+        
         /* Parse boolean fields manually */
-        char *save_str = strstr(json_str, "\"save_to_file\"");
+        char *save_str = strstr(json_str, "\"saveToFile\"");
         if (save_str) {
             save_str = strchr(save_str, ':');
             if (save_str) {
@@ -197,7 +280,7 @@ int mqtt_parse_json_metadata(const char *json_str,
             }
         }
         
-        char *interrupt_str = strstr(json_str, "\"interrupt_current\"");
+        char *interrupt_str = strstr(json_str, "\"interruptCurrent\"");
         if (interrupt_str) {
             interrupt_str = strchr(interrupt_str, ':');
             if (interrupt_str) {
@@ -213,8 +296,11 @@ int mqtt_parse_json_metadata(const char *json_str,
             return MQTT_PARSER_ERR_MISSING_FIELD;
         }
         
-        /* Even if full parsing failed, we can proceed with just the size */
-        LOG_WRN("Using partial metadata, opus_data_size=%u", metadata->opus_data_size);
+        /* Even if full parsing failed, we can proceed with manual parsing */
+        LOG_WRN("Using manual parsing - size=%u, vol=%u, pri=%u, count=%u, save=%d, interrupt=%d, file='%s'", 
+                metadata->opus_data_size, metadata->volume, metadata->priority,
+                metadata->play_count, metadata->save_to_file, metadata->interrupt_current,
+                metadata->filename);
         return MQTT_PARSER_SUCCESS;
     }
     
