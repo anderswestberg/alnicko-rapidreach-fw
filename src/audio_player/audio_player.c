@@ -159,6 +159,12 @@ static player_status_t audio_player_init(void)
     player_status_t ret_status;
     int             ret;
 
+    /* Check if already initialized */
+    if (audio_player_cfg.is_codec_ready) {
+        LOG_DBG("Audio player already initialized");
+        return PLAYER_OK;
+    }
+
     if (!device_is_ready(audio_player_cfg.codec_standby_gpio.port)) {
         LOG_ERR("GPIO EN for codec is not ready");
         return PLAYER_ERROR_GPIO_INIT;
@@ -764,7 +770,10 @@ static bool handle_audio_control_events(void)
  */
 static void audio_thread_func(void)
 {
+    LOG_INF("Audio player thread started");
     k_event_init(&audio_player_cfg.audio_event);
+    
+    /* Initialize audio player if not already done */
     if (audio_player_init() != PLAYER_OK) {
         LOG_ERR("Failed to initialize audio player");
     }
@@ -774,8 +783,15 @@ static void audio_thread_func(void)
                                     AUDIO_EVT_START | AUDIO_EVT_PING,
                                     true,
                                     K_FOREVER);
+        
+        /* Handle ping events quietly */
+        if (evt & AUDIO_EVT_PING) {
+            k_event_post(&audio_player_cfg.audio_event, AUDIO_EVT_PING_REPLY);
+            continue;
+        }
 
         if (evt & AUDIO_EVT_START) {
+            LOG_INF("Received AUDIO_EVT_START, file: %s", audio_player_cfg.filepath);
 
             ogg_sync_state   oy;
             ogg_page         og;
@@ -791,6 +807,7 @@ static void audio_thread_func(void)
             bool stopped              = false;
 
             if (start_audio_playback() != PLAYER_OK) {
+                LOG_ERR("start_audio_playback() failed");
                 continue;
             }
 
@@ -852,9 +869,11 @@ static void audio_thread_func(void)
                         
                         /* Yield periodically to allow other threads (like MQTT) to run */
                         static int yield_counter = 0;
-                        if (++yield_counter >= 3) {  /* Yield more frequently - every 3 packets */
+                        if (++yield_counter >= 1) {  /* Yield after every packet for better MQTT handling */
                             yield_counter = 0;
                             k_yield();
+                            /* Allow a bit more time for network processing */
+                            k_msleep(1);
                         }
                     }
                 }
@@ -919,6 +938,7 @@ player_status_t audio_player_start(const char *filepath)
             sizeof(audio_player_cfg.filepath) - 1);
     audio_player_cfg.filepath[sizeof(audio_player_cfg.filepath) - 1] = '\0';
 
+    LOG_INF("Posting AUDIO_EVT_START for file: %s", filepath);
     k_event_post(&audio_player_cfg.audio_event, AUDIO_EVT_START);
     return PLAYER_OK;
 }

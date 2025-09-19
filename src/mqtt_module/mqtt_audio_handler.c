@@ -6,6 +6,7 @@
 #include "mqtt_audio_handler.h"
 #include "mqtt_message_parser.h"
 #include "mqtt_module.h"
+#include "mqtt_audio_queue.h"
 #include "../audio_player/audio_player.h"
 #include "../file_manager/file_manager.h"
 #include "../dev_info/dev_info.h"
@@ -37,9 +38,6 @@ struct audio_msg_queue_item {
 #define AUDIO_QUEUE_SIZE 5
 K_MSGQ_DEFINE(audio_msg_queue, sizeof(struct audio_msg_queue_item), AUDIO_QUEUE_SIZE, 4);
 
-/* Track audio system initialization status */
-static bool audio_initialized = false;
-
 void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t payload_len)
 {
     mqtt_parsed_message_t parsed_msg;
@@ -70,7 +68,7 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
         audio_in_file = true;
         /* Prefer the last file the MQTT module wrote, fallback to known names */
         extern char g_mqtt_last_temp_file[];
-        if (g_mqtt_last_temp_file && g_mqtt_last_temp_file[0] != '\0' &&
+        if (g_mqtt_last_temp_file[0] != '\0' &&
             file_manager_exists(g_mqtt_last_temp_file) == 1) {
             temp_audio_file = g_mqtt_last_temp_file;
         } else if (file_manager_exists("/lfs/mqtt_audio_1.opus") == 1) {
@@ -97,43 +95,13 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
         parsed_msg.metadata.volume = MAX_AUDIO_VOLUME_PERCENT;
     }
     
-    /* Handle based on priority and current playback state */
-    if (parsed_msg.metadata.interrupt_current) {
-        /* Stop current playback if needed */
-        LOG_INF("Interrupting current playback for priority %d message",
-                parsed_msg.metadata.priority);
-        if (audio_initialized) {
-            audio_player_stop();
-            k_msleep(100); /* Allow stop to complete */
-        }
-    } else {
-        /* Wait for current playback to finish - but only if audio system is initialized */
-        if (!audio_initialized) {
-            /* Try to initialize audio if not done yet */
-            player_status_t status = codec_enable();
-            if (status == PLAYER_OK) {
-                audio_initialized = true;
-                LOG_INF("Audio system initialized on first use");
-            } else {
-                LOG_WRN("Failed to initialize audio system: %d", status);
-            }
-        }
-        
-        if (audio_initialized) {
-            int wait_count = 0;
-            while (get_playing_status() && wait_count < 300) { /* Max wait 30 seconds */
-                LOG_DBG("Waiting for current playback to finish... (%d/300)", wait_count);
-                k_msleep(100);
-                wait_count++;
-            }
-            
-            if (wait_count >= 300) {
-                LOG_WRN("Timeout waiting for playback to finish, proceeding anyway");
-            } else if (wait_count > 0) {
-                LOG_INF("Waited %d ms for previous playback to finish", wait_count * 100);
-            }
-        }
-    }
+    /* Create queue item */
+    struct audio_queue_item queue_item = {
+        .volume = parsed_msg.metadata.volume,
+        .priority = parsed_msg.metadata.priority,
+        .play_count = parsed_msg.metadata.play_count,
+        .interrupt_current = parsed_msg.metadata.interrupt_current
+    };
     
     /* Handle file save or direct playback */
     if (parsed_msg.metadata.save_to_file && strlen(parsed_msg.metadata.filename) > 0) {
@@ -211,157 +179,51 @@ void mqtt_audio_alert_handler(const char *topic, const uint8_t *payload, size_t 
             LOG_INF("Saved audio to '%s'", filepath);
         }
         
-        /* Set volume before playback */
-        if (parsed_msg.metadata.volume <= 100) {
-#if DT_NODE_HAS_COMPAT(DT_NODELABEL(audio_codec), ti_tas6422dac)
-            /* Map 0-100% to TAS6422DAC range (-200 to +48 in 0.5 dB steps) */
-            int codec_volume;
-            if (parsed_msg.metadata.volume == 0) {
-                codec_volume = -200;  /* Mute */
-            } else if (parsed_msg.metadata.volume <= 80) {
-                /* 0-80% maps to -200 to 0 (mute to 0 dB) */
-                codec_volume = -200 + (parsed_msg.metadata.volume * 200 / 80);
-            } else {
-                /* 80-100% maps to 0 to +48 (0 dB to +24 dB) */
-                codec_volume = (parsed_msg.metadata.volume - 80) * 48 / 20;
-            }
-            LOG_INF("Audio volume request: %d%%, mapped codec value: %d", 
-                    parsed_msg.metadata.volume, codec_volume);
-            if (codec_volume < MINIMUM_CODEC_VOLUME) {
-                codec_volume = MINIMUM_CODEC_VOLUME;
-            }
-            if (codec_volume > MAXIMUM_CODEC_VOLUME) {
-                codec_volume = MAXIMUM_CODEC_VOLUME;
-            }
-            ret = audio_player_set_volume(codec_volume);
-            if (ret != PLAYER_OK) {
-                LOG_ERR("audio_player_set_volume failed: %d", ret);
-            }
-#else
-            /* For other codecs, pass volume directly */
-            LOG_INF("Audio volume request: %d%% (direct)", parsed_msg.metadata.volume);
-            ret = audio_player_set_volume(parsed_msg.metadata.volume);
-            if (ret != PLAYER_OK) {
-                LOG_ERR("audio_player_set_volume failed: %d", ret);
-            }
-#endif
-        }
+        /* Copy filename to queue item */
+        strncpy(queue_item.filename, filepath, sizeof(queue_item.filename) - 1);
+        queue_item.filename[sizeof(queue_item.filename) - 1] = '\0';
         
-        /* Ensure audio system is initialized before playback */
-        if (!audio_initialized) {
-            player_status_t status = codec_enable();
-            if (status == PLAYER_OK) {
-                audio_initialized = true;
-                LOG_INF("Audio system initialized before playback");
-            } else {
-                LOG_ERR("Failed to initialize audio system: %d", status);
-                return;
-            }
-        }
-        
-        /* Start playback from saved file (non-blocking) */
-        ret = audio_player_start(filepath);
-        if (ret != PLAYER_OK) {
-            LOG_ERR("Failed to start audio playback: %d", ret);
+        /* Add to playback queue */
+        ret = audio_queue_add(&queue_item);
+        if (ret != 0) {
+            LOG_ERR("Failed to queue audio file: %d", ret);
+            /* Delete file if queueing failed */
+            file_manager_delete(filepath);
         } else {
-            LOG_INF("Audio playback started from saved file '%s'", filepath);
-            /* TODO: Handle play_count > 1 and infinite playback in audio player */
-            if (parsed_msg.metadata.play_count != 1) {
-                LOG_WRN("play_count=%d not yet supported, playing once", 
-                        parsed_msg.metadata.play_count);
-            }
+            LOG_INF("Audio file '%s' queued for playback", filepath);
         }
     } else {
             /* Use temporary file for immediate playback */
-            const char *play_file = audio_in_file ? temp_audio_file : TEMP_AUDIO_FILE_PATH;
+            const char *play_file = NULL;
             
-            if (!audio_in_file) {
-                /* Save to temporary file */
+            if (audio_in_file) {
+                /* Audio already in file from MQTT module */
+                play_file = temp_audio_file;
+            } else {
+                /* Audio data is in memory, write to temporary file */
                 ret = file_manager_write(TEMP_AUDIO_FILE_PATH, parsed_msg.opus_data, parsed_msg.opus_data_len);
                 if (ret < 0) {
                     LOG_ERR("Failed to save temporary audio file: %d", ret);
                     return;
                 }
+                play_file = TEMP_AUDIO_FILE_PATH;
             }
             
-            /* Set volume if supported */
-            if (parsed_msg.metadata.volume <= 100) {
-#if DT_NODE_HAS_COMPAT(DT_NODELABEL(audio_codec), ti_tas6422dac)
-                /* Map 0-100% to TAS6422DAC range (-200 to +48 in 0.5 dB steps)
-                 * Web volume:  Codec value:  dB:
-                 * 0%          -200          -100 dB (mute)
-                 * 15%         -120          -60 dB
-                 * 50%         -50           -25 dB  
-                 * 80%         0             0 dB
-                 * 100%        48            +24 dB (max)
-                 */
-                int codec_volume;
-                if (parsed_msg.metadata.volume == 0) {
-                    codec_volume = -200;  /* Mute */
-                } else if (parsed_msg.metadata.volume <= 80) {
-                    /* 0-80% maps to -200 to 0 (mute to 0 dB) */
-                    codec_volume = -200 + (parsed_msg.metadata.volume * 200 / 80);
-                } else {
-                    /* 80-100% maps to 0 to +48 (0 dB to +24 dB) */
-                    codec_volume = (parsed_msg.metadata.volume - 80) * 48 / 20;
-                }
-                LOG_INF("Audio volume request: %d%%, mapped codec value: %d", 
-                        parsed_msg.metadata.volume, codec_volume);
-                if (codec_volume < MINIMUM_CODEC_VOLUME) {
-                    codec_volume = MINIMUM_CODEC_VOLUME;
-                }
-                if (codec_volume > MAXIMUM_CODEC_VOLUME) {
-                    codec_volume = MAXIMUM_CODEC_VOLUME;
-                }
-                ret = audio_player_set_volume(codec_volume);
-                if (ret != PLAYER_OK) {
-                    LOG_ERR("audio_player_set_volume failed: %d", ret);
-                }
-#else
-                /* For other codecs, pass volume directly */
-                LOG_INF("Audio volume request: %d%% (direct)", parsed_msg.metadata.volume);
-                ret = audio_player_set_volume(parsed_msg.metadata.volume);
-                if (ret != PLAYER_OK) {
-                    LOG_ERR("audio_player_set_volume failed: %d", ret);
-                }
-#endif
-                if (ret != PLAYER_OK) {
-                    LOG_WRN("Failed to set volume: %d", ret);
-                }
-            }
+            /* Copy filename to queue item */
+            strncpy(queue_item.filename, play_file, sizeof(queue_item.filename) - 1);
+            queue_item.filename[sizeof(queue_item.filename) - 1] = '\0';
             
-            /* Ensure audio system is initialized before playback */
-            if (!audio_initialized) {
-                player_status_t status = codec_enable();
-                if (status == PLAYER_OK) {
-                    audio_initialized = true;
-                    LOG_INF("Audio system initialized before playback");
-                } else {
-                    LOG_ERR("Failed to initialize audio system: %d", status);
-                    if (!audio_in_file) {
-                        file_manager_delete(TEMP_AUDIO_FILE_PATH);
-                    }
-                    return;
+            /* Add to playback queue */
+            ret = audio_queue_add(&queue_item);
+            if (ret != 0) {
+                LOG_ERR("Failed to queue audio file: %d", ret);
+                /* Delete temporary file if queueing failed and it's not from MQTT module */
+                if (!audio_in_file && strcmp(play_file, TEMP_AUDIO_FILE_PATH) == 0) {
+                    file_manager_delete(play_file);
                 }
-            }
-            
-            /* Start playback (non-blocking) */
-            ret = audio_player_start(play_file);
-            if (ret != PLAYER_OK) {
-                LOG_ERR("Failed to start audio playback: %d", ret);
             } else {
-                LOG_INF("Audio playback started from '%s'", play_file);
-                /* TODO: Handle play_count > 1 and infinite playback in audio player */
-                if (parsed_msg.metadata.play_count != 1) {
-                    LOG_WRN("play_count=%d not yet supported, playing once", 
-                            parsed_msg.metadata.play_count);
-                }
+                LOG_INF("Audio file '%s' queued for playback", play_file);
             }
-            
-            /* TODO: Delete temporary file after playback completes.
-             * For now, we'll leave it and it will be overwritten by next audio.
-             * Proper solution would be to have audio player notify when done. */
-            LOG_DBG("Temporary audio file kept for playback: %s", play_file);
         }
 
 }
@@ -388,8 +250,16 @@ int mqtt_audio_handler_init(void)
 {
     const char *topic = mqtt_get_audio_alert_topic();
     mqtt_status_t ret;
+    int queue_ret;
     
     LOG_INF("Subscribing to audio alert topic: %s", topic);
+    
+    /* Initialize audio queue first */
+    queue_ret = audio_queue_init();
+    if (queue_ret != 0) {
+        LOG_ERR("Failed to initialize audio queue: %d", queue_ret);
+        return queue_ret;
+    }
     
     /* Subscribe to audio alert topic */
     ret = mqtt_module_subscribe(topic, 1, mqtt_audio_alert_handler);

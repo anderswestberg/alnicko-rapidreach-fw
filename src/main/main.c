@@ -34,6 +34,10 @@
 #include "../examples/power_supervisor.h"
 #endif
 
+#ifdef CONFIG_LOG_SETTINGS
+#include "../log_settings/log_settings.h"
+#endif
+
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 /* Track link status to trigger re-init of shell backend if needed */
@@ -163,15 +167,25 @@ static struct k_thread network_startup_thread;
 
 int main(void)
 {
+    int ret;
+    
 #ifdef CONFIG_EXAMPLES_ENABLE_MAIN_EXAMPLES
     /* Register early ping callback to prevent watchdog resets during boot */
     supervisor_ping_register_callback(early_ping_callback);
     LOG_INF("Registered early ping callback for watchdog");
 #endif
 
+#ifdef CONFIG_LOG_SETTINGS_AUTO_LOAD
+    /* Load saved log settings early in boot */
+    ret = log_settings_init();
+    if (ret < 0) {
+        LOG_WRN("Failed to initialize log settings: %d", ret);
+    }
+#endif
+
 #ifdef CONFIG_RPR_MODULE_INIT_SM
     /* Initialize and start the state machine for system startup */
-    int ret = init_state_machine_init();
+    ret = init_state_machine_init();
     if (ret < 0) {
         LOG_ERR("Failed to initialize state machine: %d", ret);
         /* Fall back to sequential startup */

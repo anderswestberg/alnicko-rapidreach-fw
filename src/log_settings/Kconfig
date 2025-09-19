@@ -1,0 +1,36 @@
+menuconfig LOG_SETTINGS
+    bool "Enable persistent log level settings"
+    depends on LOG_RUNTIME_FILTERING
+    depends on RPR_MODULE_FILE_MANAGER
+    default y
+    help
+      Enable saving and restoring log filter settings to/from
+      persistent storage. Settings are stored as JSON in the
+      filesystem.
+
+if LOG_SETTINGS
+
+config LOG_SETTINGS_SHELL
+    bool "Enable shell commands for log settings"
+    depends on SHELL
+    default y
+    help
+      Enable shell commands to save, load, and clear log settings.
+      Commands: log_settings save, log_settings load, log_settings clear
+
+config LOG_SETTINGS_AUTO_SAVE
+    bool "Automatically save log settings on change"
+    default n
+    help
+      Automatically save log settings when they are changed via
+      shell commands. This requires hooking into the log control
+      system which may add overhead.
+
+config LOG_SETTINGS_AUTO_LOAD
+    bool "Automatically load settings on boot"
+    default y
+    help
+      Automatically load and apply saved log settings during
+      system initialization.
+
+endif # LOG_SETTINGS

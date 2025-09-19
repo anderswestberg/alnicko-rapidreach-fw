@@ -1048,14 +1048,14 @@ void domain_logic_func(void)
         // While audio is playing, check for microphone input
         if (get_playing_status()) {
             if (microphone_is_sound_detected()) {
-                LOG_DBG("Microphone activity detected during playback.");
+                /* Skip logging to reduce spam */
                 mic_inactive_counter = 0;
             } else {
                 mic_inactive_counter++;
             }
             if (mic_inactive_counter >=
                 CONFIG_EXAMPLES_DOMAIN_LOGIC_MIC_INACTIVE_THRESHOLD) {
-                LOG_WRN("No microphone input detected during playback.");
+                /* Skip logging to reduce spam */
             }
         }
     }

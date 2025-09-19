@@ -334,11 +334,12 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             
 #ifdef CONFIG_RPR_MODULE_FILE_MANAGER
             /* Save audio data to file with frequent yields */
-            /* Use alternating files to avoid conflicts with audio player */
-            static int file_index = 0;
+            /* Use unique filename with timestamp and counter */
+            static uint32_t file_counter = 0;
             char audio_file[32];
-            snprintf(audio_file, sizeof(audio_file), "/lfs/mqtt_audio_%d.opus", file_index);
-            file_index = (file_index + 1) % 2; /* Alternate between 0 and 1 */
+            uint32_t timestamp = k_uptime_get_32() & 0xFFFF; /* Use lower 16 bits of uptime */
+            snprintf(audio_file, sizeof(audio_file), "/lfs/mqtt_audio_%04x_%03u.opus", 
+                     timestamp, (file_counter++) % 1000);
             
             struct fs_file_t file;
             fs_file_t_init(&file);
@@ -406,7 +407,6 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
              * during the ~1.3 second file write operation. The 60-second keepalive
              * timeout should be sufficient to handle this delay. */
             uint8_t chunk_buf[64];  /* Very small chunks for maximum responsiveness */
-            int chunk_count = 0;
             int64_t start_time = k_uptime_get();
             LOG_INF("Starting file write at time: %lld", start_time);
             
@@ -436,12 +436,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 /* Yield after every chunk (64 bytes) for maximum responsiveness */
                 k_yield();
                 
-                /* Log progress periodically */
-                int64_t now = k_uptime_get();
-                if ((now - start_time) > 1000 && chunk_count % 50 == 0) {
-            LOG_INF("File write progress: %zu bytes written, %zu remaining (elapsed: %lld ms)", 
-                    written, audio_remaining, (now - start_time));
-                }
+                /* Skip progress logging to reduce spam */
             }
             
             fs_close(&file);
