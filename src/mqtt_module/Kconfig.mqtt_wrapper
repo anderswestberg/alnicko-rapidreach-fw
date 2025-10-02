@@ -1,0 +1,84 @@
+# MQTT Client Wrapper Configuration
+
+menuconfig RPR_MQTT_CLIENT_WRAPPER
+    bool "Enable thread-safe MQTT client wrapper"
+    depends on RPR_MODULE_MQTT
+    default y
+    help
+      Enable the thread-safe MQTT client wrapper with improved reliability.
+      This wrapper provides non-blocking operations, automatic reconnection,
+      and proper thread separation between protocol and application logic.
+
+if RPR_MQTT_CLIENT_WRAPPER
+
+config MQTT_WRAPPER_PROTOCOL_STACK_SIZE
+    int "Protocol thread stack size"
+    default 4096
+    help
+      Stack size for the MQTT protocol thread that handles mqtt_input(),
+      mqtt_live(), and reconnection logic.
+
+config MQTT_WRAPPER_WORKER_STACK_SIZE
+    int "Worker thread stack size"
+    default 8192
+    help
+      Stack size for the worker thread that processes received messages.
+      Should be large enough to handle file I/O and message callbacks.
+
+config MQTT_WRAPPER_RX_BUFFER_SIZE
+    int "MQTT receive buffer size"
+    default 4096
+    help
+      Size of the buffer for receiving MQTT messages. Should be large
+      enough to handle expected message sizes.
+
+config MQTT_WRAPPER_TX_BUFFER_SIZE
+    int "MQTT transmit buffer size"
+    default 2048
+    help
+      Size of the buffer for transmitting MQTT messages.
+
+config MQTT_WRAPPER_MSG_QUEUE_SIZE
+    int "Message queue size"
+    default 10
+    help
+      Number of messages that can be queued for processing.
+
+config MQTT_WRAPPER_PUB_QUEUE_SIZE
+    int "Publish queue size"
+    default 20
+    help
+      Number of publish operations that can be queued.
+
+config MQTT_WRAPPER_MAX_SUBSCRIPTIONS
+    int "Maximum number of subscriptions"
+    default 8
+    help
+      Maximum number of topic subscriptions supported.
+
+config MQTT_WRAPPER_RECONNECT_MIN_INTERVAL_MS
+    int "Minimum reconnection interval (ms)"
+    default 5000
+    help
+      Minimum time to wait between reconnection attempts.
+
+config MQTT_WRAPPER_RECONNECT_MAX_INTERVAL_MS
+    int "Maximum reconnection interval (ms)"
+    default 300000
+    help
+      Maximum time to wait between reconnection attempts (5 minutes default).
+
+config MQTT_WRAPPER_PROTOCOL_THREAD_PRIORITY
+    int "Protocol thread priority"
+    default 7
+    help
+      Priority of the MQTT protocol thread. Lower values = higher priority.
+      Should be high priority to ensure timely keepalive transmission.
+
+config MQTT_WRAPPER_WORKER_THREAD_PRIORITY
+    int "Worker thread priority"
+    default 5
+    help
+      Priority of the message processing worker thread.
+
+endif # RPR_MQTT_CLIENT_WRAPPER

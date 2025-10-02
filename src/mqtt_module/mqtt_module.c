@@ -86,6 +86,7 @@ static int reconnect_attempts = 0;
 #define MIN_RECONNECT_INTERVAL_MS 5000    /* 5 seconds minimum */
 #define MAX_RECONNECT_INTERVAL_MS 300000  /* 5 minutes maximum */
 #define RECONNECT_BACKOFF_MULTIPLIER 2    /* Double the interval each failure */
+#define MAX_RECONNECT_ATTEMPTS 10         /* Maximum attempts before requiring manual intervention */
 
 /* Event handler callback */
 static mqtt_event_handler_t event_handler = NULL;
@@ -439,6 +440,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 /* Skip progress logging to reduce spam */
             }
             
+            /* Sync file to ensure data is written to flash */
+            fs_sync(&file);
             fs_close(&file);
             int64_t end_time = k_uptime_get();
             LOG_INF("Audio saved to %s (%zu bytes) at time: %lld (duration: %lld ms)", 
@@ -595,14 +598,20 @@ static int mqtt_internal_connect(void)
     if (client.transport.tcp.sock >= 0) {
         LOG_INF("Cleaning up previous socket (fd=%d) before reconnect", client.transport.tcp.sock);
         mqtt_disconnect(&client);
-        k_sleep(K_MSEC(50)); /* Brief delay for cleanup */
+        k_sleep(K_MSEC(100)); /* Increased delay for cleanup */
         
-        /* Re-initialize the client structure */
-        ret = prepare_mqtt_client();
-        if (ret != 0) {
-            LOG_ERR("Failed to re-prepare MQTT client: %d", ret);
-            return ret;
+        /* Force socket closed if still open */
+        if (client.transport.tcp.sock >= 0) {
+            zsock_close(client.transport.tcp.sock);
+            client.transport.tcp.sock = -1;
         }
+    }
+    
+    /* Always re-initialize the client structure for clean state */
+    ret = prepare_mqtt_client();
+    if (ret != 0) {
+        LOG_ERR("Failed to re-prepare MQTT client: %d", ret);
+        return ret;
     }
 
     LOG_INF("Attempting MQTT connection to %s:%d...", 
@@ -691,10 +700,18 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                 }
             }
         } else if (auto_reconnect_enabled) {
+            /* Check if we've exceeded max attempts */
+            if (reconnect_attempts >= MAX_RECONNECT_ATTEMPTS) {
+                LOG_ERR("MQTT reconnection failed after %d attempts, stopping auto-reconnect", 
+                        MAX_RECONNECT_ATTEMPTS);
+                auto_reconnect_enabled = false;
+                continue;
+            }
+            
             /* Attempt auto-reconnection if enough time has passed */
             if (current_time - last_reconnect_attempt >= reconnect_interval_ms) {
-                LOG_INF("Auto-reconnecting to MQTT broker (attempt %d, wait %d ms)...", 
-                        reconnect_attempts + 1, reconnect_interval_ms);
+                LOG_INF("Auto-reconnecting to MQTT broker (attempt %d/%d, wait %d ms)...", 
+                        reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS, reconnect_interval_ms);
                 ret = mqtt_internal_connect();
                 if (ret == 0) {
                     /* Wait a bit for the connection to establish */
@@ -890,6 +907,7 @@ static int prepare_mqtt_client(void)
     client.password = NULL;
 #endif
     client.protocol_version = MQTT_VERSION_3_1_1;
+    client.clean_session = 1; /* Use clean session to avoid stale state */
 
     /* MQTT buffers */
     client.rx_buf = rx_buffer;

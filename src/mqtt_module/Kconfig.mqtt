@@ -68,4 +68,6 @@ config RPR_MQTT_PASSWORD
     help
       Password for authenticating to the MQTT broker. Leave unset for anonymous.
 
+rsource "Kconfig.mqtt_wrapper"
+
 endif # RPR_MODULE_MQTT

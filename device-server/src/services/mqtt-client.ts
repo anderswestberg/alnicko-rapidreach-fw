@@ -312,7 +312,6 @@ export class DeviceMqttClient extends EventEmitter {
                    ? now  // For boot-relative timestamps, just use current time for now
                    : new Date(p.timestamp))
                 : now,
-              module: p.module || 'unknown',
             };
           });
         } else if (Array.isArray(parsed)) {

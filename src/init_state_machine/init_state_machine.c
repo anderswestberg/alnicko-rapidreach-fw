@@ -403,13 +403,25 @@ static void state_operational_entry(init_sm_context_t *ctx, init_event_t event)
     LOG_INF("Starting MQTT heartbeat");
     mqtt_start_heartbeat();
     
-    /* Initialize MQTT audio handler */
+#ifdef CONFIG_RPR_MQTT_CLIENT_WRAPPER
+    /* Use new wrapper for audio handling */
+    LOG_INF("Using new MQTT wrapper for audio handling");
+    extern int test_mqtt_wrapper_init(void);
+    int ret = test_mqtt_wrapper_init();
+    if (ret == 0) {
+        LOG_INF("MQTT wrapper test initialized successfully");
+    } else {
+        LOG_ERR("Failed to initialize MQTT wrapper test: %d", ret);
+    }
+#else
+    /* Initialize old MQTT audio handler */
     int ret = mqtt_audio_handler_init();
     if (ret == 0) {
         LOG_INF("MQTT audio handler initialized successfully");
     } else {
         LOG_ERR("Failed to initialize MQTT audio handler: %d", ret);
     }
+#endif
     
     /* Initialize MQTT log client if enabled */
 #ifdef CONFIG_RPR_MQTT_LOG_CLIENT

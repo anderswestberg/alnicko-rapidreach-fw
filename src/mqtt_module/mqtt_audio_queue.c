@@ -58,11 +58,13 @@ static void audio_playback_thread(void *p1, void *p2, void *p3)
     
     while (1) {
         /* Wait for audio item from queue */
+        LOG_DBG("Waiting for audio item from queue...");
         ret = k_msgq_get(&audio_msgq, &item, K_FOREVER);
         if (ret != 0) {
             LOG_ERR("Failed to get item from queue: %d", ret);
             continue;
         }
+        LOG_INF("Got audio item from queue: %s", item.filename);
         
         LOG_INF("Processing audio from queue: %s (vol=%d%%, pri=%d, count=%d, interrupt=%d)",
                 item.filename, item.volume, item.priority, item.play_count, item.interrupt_current);
@@ -162,12 +164,19 @@ static void audio_playback_thread(void *p1, void *p2, void *p3)
             currently_playing = true;
             k_mutex_unlock(&state_mutex);
             
+            /* Small delay to ensure file is ready */
+            k_msleep(50);
+            
             /* Start playback */
             LOG_INF("Calling audio_player_start for file: %s", item.filename);
             player_status_t status = audio_player_start((char *)item.filename);
             if (status != PLAYER_OK) {
                 LOG_ERR("Failed to start audio playback: %d", status);
-                break;
+                /* Mark as not playing and continue to next item */
+                k_mutex_lock(&state_mutex, K_FOREVER);
+                currently_playing = false;
+                k_mutex_unlock(&state_mutex);
+                continue;
             }
             
             LOG_INF("audio_player_start returned OK for %s", item.filename);
@@ -222,6 +231,9 @@ static void audio_playback_thread(void *p1, void *p2, void *p3)
             
             if (playback_timeout >= 600) {
                 LOG_WRN("Playback timeout after 60 seconds");
+                /* Force stop the player to recover */
+                audio_player_stop();
+                k_msleep(100);
             }
         }
         
