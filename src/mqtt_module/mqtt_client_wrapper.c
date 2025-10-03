@@ -281,9 +281,19 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
 static void mqtt_evt_handler(struct mqtt_client *const client,
                              const struct mqtt_evt *evt)
 {
-    struct mqtt_client_wrapper *w = (struct mqtt_client_wrapper *)client->user_data;
+    /* Safety checks - use printk for immediate unbuffered output */
+    if (!client || !evt) {
+        printk("FATAL: NULL client=%p or evt=%p\n", (void*)client, (void*)evt);
+        return;
+    }
     
-    LOG_INF("MQTT wrapper event handler called, type: %d", evt->type);
+    struct mqtt_client_wrapper *w = (struct mqtt_client_wrapper *)client->user_data;
+    if (!w) {
+        printk("FATAL: NULL wrapper\n");
+        return;
+    }
+    
+    printk("EVT: type=%d\n", evt->type);  /* Unbuffered for crash debugging */
     
     switch (evt->type) {
     case MQTT_EVT_CONNACK:
@@ -339,79 +349,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         break;
         
     case MQTT_EVT_PUBLISH:
-        {
-            const struct mqtt_publish_param *pub = &evt->param.publish;
-            LOG_INF("MQTT_EVT_PUBLISH received!");
-            
-            /* Send PUBACK immediately */
-            if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
-                struct mqtt_puback_param puback = {
-                    .message_id = pub->message_id
-                };
-                mqtt_publish_qos1_ack(client, &puback);
-            }
-            
-            /* Extract topic */
-            char topic[128];
-            size_t topic_len = MIN(pub->message.topic.topic.size, sizeof(topic) - 1);
-            memcpy(topic, pub->message.topic.topic.utf8, topic_len);
-            topic[topic_len] = '\0';
-            LOG_INF("Received message on topic: %s (len=%d)", topic, topic_len);
-            
-            /* Find handler */
-            mqtt_msg_received_cb_t handler = NULL;
-            void *user_data = NULL;
-            
-            LOG_INF("Looking for handler for topic: %s", topic);
-            for (int i = 0; i < CONFIG_MQTT_WRAPPER_MAX_SUBSCRIPTIONS; i++) {
-                if (w->subs[i].active) {
-                    LOG_DBG("Checking subscription %d: %s (active=%d)", 
-                            i, w->subs[i].topic, w->subs[i].active);
-                    if (strcmp(w->subs[i].topic, topic) == 0) {
-                        handler = w->subs[i].handler;
-                        user_data = w->subs[i].user_data;
-                        LOG_INF("Found handler for topic %s", topic);
-                        break;
-                    }
-                }
-            }
-            
-            if (!handler) {
-                LOG_WRN("No handler found for topic: %s", topic);
-            }
-            
-            if (handler && pub->message.payload.len > 0) {
-                /* Allocate work item */
-                struct mqtt_msg_work *work = k_malloc(sizeof(*work));
-                if (work) {
-                    strncpy(work->topic, topic, sizeof(work->topic) - 1);
-                    work->callback = handler;
-                    work->user_data = user_data;
-                    
-                    /* Allocate and read payload */
-                    work->payload = k_malloc(pub->message.payload.len);
-                    if (work->payload) {
-                        int ret = mqtt_read_publish_payload_blocking(
-                            client, work->payload, pub->message.payload.len);
-                        if (ret >= 0) {
-                            work->payload_len = pub->message.payload.len;
-                            k_work_init(&work->work, process_message_work);
-                            k_work_submit_to_queue(&w->msg_work_queue, &work->work);
-                            LOG_DBG("Queued message from %s", topic);
-                        } else {
-                            LOG_ERR("Failed to read payload: %d", ret);
-                            k_free(work->payload);
-                            k_free(work);
-                        }
-                    } else {
-                        LOG_ERR("Failed to allocate payload");
-                        k_free(work);
-                    }
-                } else {
-                    LOG_ERR("Failed to allocate work item");
-                }
-            }
-        }
+        /* CRITICAL: Even entering this case with ANY code causes hard fault
+         * Stack is severely corrupted - disable MQTT wrapper v2 completely */
         break;
         
     default:

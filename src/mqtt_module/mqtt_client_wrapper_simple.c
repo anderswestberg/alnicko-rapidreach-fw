@@ -272,7 +272,19 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
 static void mqtt_evt_handler(struct mqtt_client *const client,
                              const struct mqtt_evt *evt)
 {
+    /* Add safety checks - corruption can cause hard faults */
+    if (!client || !evt) {
+        printk("FATAL: NULL client=%p or evt=%p\n", (void*)client, (void*)evt);
+        return;
+    }
+    
     struct mqtt_client_wrapper *w = (struct mqtt_client_wrapper *)client->user_data;
+    if (!w) {
+        printk("FATAL: NULL wrapper user_data\n");
+        return;
+    }
+    
+    printk("EVT: type=%d\n", evt->type);  /* Use printk for immediate output */
     
     switch (evt->type) {
     case MQTT_EVT_CONNACK:
@@ -329,21 +341,28 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         
     case MQTT_EVT_PUBLISH:
         {
+            printk("PUB: entering PUBLISH case\n");
             const struct mqtt_publish_param *pub = &evt->param.publish;
+            printk("PUB: got param, len=%zu\n", pub->message.payload.len);
             
             /* Send PUBACK immediately */
             if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+                printk("PUB: sending PUBACK\n");
                 struct mqtt_puback_param puback = {
                     .message_id = pub->message_id
                 };
-                mqtt_publish_qos1_ack(client, &puback);
+                int ack_ret = mqtt_publish_qos1_ack(client, &puback);
+                printk("PUB: PUBACK sent, ret=%d\n", ack_ret);
             }
             
             /* Extract topic */
+            printk("PUB: extracting topic\n");
             char topic[128];
             size_t topic_len = MIN(pub->message.topic.topic.size, sizeof(topic) - 1);
+            printk("PUB: about to memcpy topic, len=%zu\n", topic_len);
             memcpy(topic, pub->message.topic.topic.utf8, topic_len);
             topic[topic_len] = '\0';
+            printk("PUB: topic=%s\n", topic);
             
             /* Find handler */
             mqtt_msg_received_cb_t handler = NULL;
@@ -359,6 +378,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             }
             
             if (handler && pub->message.payload.len > 0) {
+                LOG_INF("Allocating work item for %zu byte message", pub->message.payload.len);
+                
                 /* Allocate work item */
                 struct mqtt_msg_work *work = k_malloc(sizeof(*work));
                 if (work) {
@@ -369,24 +390,50 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                     /* Allocate and read payload */
                     work->payload = k_malloc(pub->message.payload.len);
                     if (work->payload) {
+                        LOG_INF("Reading %zu bytes of payload (this may block)...", pub->message.payload.len);
                         int ret = mqtt_read_publish_payload_blocking(
                             client, work->payload, pub->message.payload.len);
+                        LOG_INF("Payload read complete, ret=%d", ret);
+                        
                         if (ret >= 0) {
                             work->payload_len = pub->message.payload.len;
                             k_work_init(&work->work, process_message_work);
-                            k_work_submit_to_queue(&w->msg_work_queue, &work->work);
-                            LOG_DBG("Queued message from %s", topic);
+                            
+                            int submit_ret = k_work_submit_to_queue(&w->msg_work_queue, &work->work);
+                            if (submit_ret < 0) {
+                                LOG_ERR("Failed to submit work: %d", submit_ret);
+                                k_free(work->payload);
+                                k_free(work);
+                            } else {
+                                LOG_INF("Queued message from %s for processing", topic);
+                            }
                         } else {
                             LOG_ERR("Failed to read payload: %d", ret);
                             k_free(work->payload);
                             k_free(work);
                         }
                     } else {
-                        LOG_ERR("Failed to allocate payload");
+                        LOG_ERR("Failed to allocate %zu bytes for payload", pub->message.payload.len);
                         k_free(work);
+                        /* Need to consume the payload even if we can't process it */
+                        uint8_t discard[64];
+                        size_t remaining = pub->message.payload.len;
+                        while (remaining > 0) {
+                            size_t chunk = MIN(remaining, sizeof(discard));
+                            mqtt_read_publish_payload_blocking(client, discard, chunk);
+                            remaining -= chunk;
+                        }
                     }
                 } else {
                     LOG_ERR("Failed to allocate work item");
+                    /* Need to consume the payload to avoid protocol errors */
+                    uint8_t discard[64];
+                    size_t remaining = pub->message.payload.len;
+                    while (remaining > 0) {
+                        size_t chunk = MIN(remaining, sizeof(discard));
+                        mqtt_read_publish_payload_blocking(client, discard, chunk);
+                        remaining -= chunk;
+                    }
                 }
             }
         }

@@ -44,6 +44,14 @@ int test_mqtt_wrapper_init(void)
 {
     LOG_INF("Starting MQTT wrapper test");
     
+    /* DISABLED: MQTT wrapper v2 has critical stack corruption bug causing system freeze
+     * when receiving PUBLISH messages. Disabling until root cause is fixed.
+     * Audio alerts will use main mqtt_module path instead. */
+    LOG_WRN("MQTT wrapper v2 audio handler DISABLED due to PUBLISH freeze bug");
+    
+    return 0;  /* Return success to allow system to continue */
+    
+#if 0  /* Disabled code - causes system freeze */
     /* Initialize the new audio handler */
     int ret = mqtt_audio_handler_v2_init();
     if (ret < 0) {
@@ -53,4 +61,5 @@ int test_mqtt_wrapper_init(void)
     
     LOG_INF("MQTT wrapper test initialized");
     return 0;
+#endif
 }

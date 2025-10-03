@@ -53,11 +53,11 @@ static bool mqtt_initialized = false;
 /* MQTT maintenance thread */
 static struct k_thread mqtt_thread;
 static k_tid_t mqtt_thread_id;
-static K_THREAD_STACK_DEFINE(mqtt_thread_stack, 8192);
+static K_THREAD_STACK_DEFINE(mqtt_thread_stack, 12288);  /* Increased from 8192 for file I/O in PUBLISH handler */
 static bool mqtt_thread_running = false;
 
 /* Audio message processing work queue */
-#define AUDIO_WORK_QUEUE_STACK_SIZE 8192
+#define AUDIO_WORK_QUEUE_STACK_SIZE 12288  /* Increased from 8192 to handle file operations */
 static K_THREAD_STACK_DEFINE(audio_work_queue_stack, AUDIO_WORK_QUEUE_STACK_SIZE);
 static struct k_work_q audio_work_queue;
 static bool audio_work_queue_initialized = false;
@@ -75,7 +75,7 @@ struct audio_msg_work {
     char temp_file[32];  /* Store filename instead of pointer */
 };
 
-#define AUDIO_WORK_ITEMS 2  /* Allow 2 pending audio messages */
+#define AUDIO_WORK_ITEMS 4  /* Increased from 2 to reduce queue exhaustion */
 
 static struct audio_msg_work audio_work_items[AUDIO_WORK_ITEMS];
 
@@ -88,14 +88,14 @@ static int64_t last_reconnect_attempt = 0;
 static int reconnect_interval_ms = 5000; /* Start with 5 seconds */
 static int reconnect_attempts = 0;
 #define MIN_RECONNECT_INTERVAL_MS 5000    /* 5 seconds minimum */
-#define MAX_RECONNECT_INTERVAL_MS 300000  /* 5 minutes maximum */
+#define MAX_RECONNECT_INTERVAL_MS 60000   /* 60 seconds maximum (standalone device needs conservative retry) */
 #define RECONNECT_BACKOFF_MULTIPLIER 2    /* Double the interval each failure */
-#define MAX_RECONNECT_ATTEMPTS 10         /* Maximum attempts before requiring manual intervention */
 
 /* Broker fallback state */
 #ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
 static bool using_fallback_broker = false;
-static int primary_broker_attempts = 0;
+static int current_broker_attempts = 0;
+static int total_reconnect_cycles = 0;   /* Track total cycles for logging */
 #endif
 
 /* Event handler callback */
@@ -189,9 +189,10 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
             reconnect_attempts = 0;
 #ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+            current_broker_attempts = 0;
             /* Log which broker we successfully connected to */
             if (using_fallback_broker) {
-                LOG_INF("Successfully connected to fallback broker");
+                LOG_INF("Successfully connected to fallback broker (cycle %d)", total_reconnect_cycles);
             } else {
                 LOG_INF("Successfully connected to primary broker");
             }
@@ -214,8 +215,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         if (using_fallback_broker) {
             LOG_INF("Disconnected from fallback broker, will retry primary broker first");
             using_fallback_broker = false;
-            primary_broker_attempts = 0;
         }
+        current_broker_attempts = 0;
+        reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
 #endif
         
 #ifdef CONFIG_RPR_MODULE_INIT_SM
@@ -504,40 +506,17 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 /* Submit to work queue */
                 ret = k_work_submit_to_queue(&audio_work_queue, &work_item->work);
                 if (ret < 0) {
-                    LOG_ERR("Failed to submit audio work: %d", ret);
+                    LOG_ERR("Failed to submit audio work to queue: %d - message dropped", ret);
                     work_item->in_use = false;
-                    /* Call handler directly */
-                    k_mutex_lock(&subscriptions_mutex, K_FOREVER);
-                    for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
-                        if (subscriptions[i].active && 
-                            strcmp(subscriptions[i].topic, topic_buf) == 0) {
-                            if (subscriptions[i].handler) {
-                                json_buf[json_end] = '\0';
-                                subscriptions[i].handler(topic_buf, json_buf, json_end);
-                            }
-                            break;
-                        }
-                    }
-                    k_mutex_unlock(&subscriptions_mutex);
+                    /* Don't call handler directly - that defeats the work queue purpose
+                     * and can cause deadlocks. Just drop the message. */
                 }
             } else {
-                LOG_ERR("No available work items, calling handler directly");
-                /* Update global latest temp file for handler */
-                strncpy(g_mqtt_last_temp_file, audio_file, sizeof(g_mqtt_last_temp_file) - 1);
-                g_mqtt_last_temp_file[sizeof(g_mqtt_last_temp_file) - 1] = '\0';
-                /* Call handler directly */
-                k_mutex_lock(&subscriptions_mutex, K_FOREVER);
-                for (int i = 0; i < MAX_SUBSCRIPTIONS; i++) {
-                    if (subscriptions[i].active && 
-                        strcmp(subscriptions[i].topic, topic_buf) == 0) {
-                        if (subscriptions[i].handler) {
-                            json_buf[json_end] = '\0';
-                            subscriptions[i].handler(topic_buf, json_buf, json_end);
-                        }
-                        break;
-                    }
-                }
-                k_mutex_unlock(&subscriptions_mutex);
+                LOG_ERR("No available work items - all %d items in use, dropping audio message", 
+                        AUDIO_WORK_ITEMS);
+                LOG_WRN("Consider increasing AUDIO_WORK_ITEMS if this happens frequently");
+                /* Don't call handler directly - that can cause deadlocks in MQTT thread */
+                /* The audio file has been saved, but we can't process it without available work items */
             }
 #else
             LOG_ERR("File manager not available for audio storage");
@@ -727,52 +706,64 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                 }
             }
         } else if (auto_reconnect_enabled) {
-            /* Check if we've exceeded max attempts */
-            if (reconnect_attempts >= MAX_RECONNECT_ATTEMPTS) {
-                LOG_ERR("MQTT reconnection failed after %d attempts, stopping auto-reconnect", 
-                        MAX_RECONNECT_ATTEMPTS);
-                auto_reconnect_enabled = false;
-                continue;
-            }
-            
             /* Attempt auto-reconnection if enough time has passed */
             if (current_time - last_reconnect_attempt >= reconnect_interval_ms) {
 #ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
-                /* Check if we should try fallback broker */
-                if (!using_fallback_broker && 
-                    primary_broker_attempts >= CONFIG_RPR_MQTT_PRIMARY_RETRIES) {
-                    
-                    /* Check if modem is available for public broker */
+                /* Check if we should switch brokers after failed attempts */
+                if (current_broker_attempts >= CONFIG_RPR_MQTT_PRIMARY_RETRIES) {
+                    /* Time to switch brokers */
+                    if (!using_fallback_broker) {
+                        /* Switch to fallback broker */
 #ifdef CONFIG_RPR_MODEM
-                    if (is_modem_connected()) {
-                        LOG_WRN("Primary broker failed %d times, switching to fallback broker",
-                                primary_broker_attempts);
-                        using_fallback_broker = true;
-                        reconnect_attempts = 0;
-                        reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
-                        
-                        /* Set modem interface as default for public connectivity */
-                        modem_set_iface_default();
-                    } else {
-                        LOG_ERR("Cannot use fallback broker: modem not connected");
-                        LOG_INF("Attempting to initialize modem for fallback connection...");
-                        c16qs_modem_status_t modem_status = modem_init_and_connect();
-                        if (modem_status == MODEM_SUCCESS) {
-                            LOG_INF("Modem initialized successfully, will retry fallback");
+                        if (is_modem_connected()) {
+                            LOG_WRN("Primary broker failed %d times, switching to fallback broker (cycle %d)",
+                                    current_broker_attempts, total_reconnect_cycles);
+                            using_fallback_broker = true;
+                            current_broker_attempts = 0;
+                            reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+                            
+                            /* Set modem interface as default for public connectivity */
+                            modem_set_iface_default();
                         } else {
-                            LOG_ERR("Modem initialization failed: %d", modem_status);
+                            LOG_WRN("Cannot switch to fallback broker: modem not connected");
+                            LOG_INF("Attempting to initialize modem for fallback connection...");
+                            c16qs_modem_status_t modem_status = modem_init_and_connect();
+                            if (modem_status == MODEM_SUCCESS) {
+                                LOG_INF("Modem initialized successfully, will retry fallback on next attempt");
+                            } else {
+                                LOG_ERR("Modem initialization failed: %d, will retry primary", modem_status);
+                                /* Reset attempts to retry primary broker again */
+                                current_broker_attempts = 0;
+                                reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+                            }
+                            last_reconnect_attempt = current_time;
+                            continue;
                         }
-                    }
 #else
-                    LOG_ERR("Fallback broker requires modem, but modem support is disabled");
-                    auto_reconnect_enabled = false;
-                    continue;
+                        LOG_WRN("Fallback broker requires modem support (disabled), retrying primary");
+                        current_broker_attempts = 0;
+                        reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
 #endif /* CONFIG_RPR_MODEM */
+                    } else {
+                        /* Switch back to primary broker */
+                        LOG_WRN("Fallback broker failed %d times, switching back to primary broker (cycle %d)",
+                                current_broker_attempts, total_reconnect_cycles);
+                        using_fallback_broker = false;
+                        current_broker_attempts = 0;
+                        reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+                        total_reconnect_cycles++;
+                    }
                 }
 #endif /* CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED */
 
-                LOG_INF("Auto-reconnecting to MQTT broker (attempt %d/%d, wait %d ms)...", 
-                        reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS, reconnect_interval_ms);
+                const char *broker_type = "MQTT broker";
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+                broker_type = using_fallback_broker ? "fallback broker" : "primary broker";
+#endif
+                LOG_INF("Auto-reconnecting to %s (attempt %d/%d, interval %d s)...", 
+                        broker_type, current_broker_attempts + 1, 
+                        CONFIG_RPR_MQTT_PRIMARY_RETRIES, reconnect_interval_ms / 1000);
+                
                 ret = mqtt_internal_connect();
                 if (ret == 0) {
                     /* Wait a bit for the connection to establish */
@@ -783,15 +774,14 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                     reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
                     reconnect_attempts = 0;
 #ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
-                    primary_broker_attempts = 0;  /* Reset primary attempts on successful connection */
+                    current_broker_attempts = 0;
+                    /* Note: keep using current broker until disconnect, don't reset to primary */
 #endif
                 } else {
                     /* Connection failed, apply exponential backoff */
                     reconnect_attempts++;
 #ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
-                    if (!using_fallback_broker) {
-                        primary_broker_attempts++;
-                    }
+                    current_broker_attempts++;
 #endif
                     reconnect_interval_ms = reconnect_interval_ms * RECONNECT_BACKOFF_MULTIPLIER;
                     if (reconnect_interval_ms > MAX_RECONNECT_INTERVAL_MS) {
