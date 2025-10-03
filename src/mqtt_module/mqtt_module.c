@@ -31,6 +31,10 @@
 #include <zephyr/fs/fs.h>
 #endif
 
+#ifdef CONFIG_RPR_MODEM
+#include "../modem/modem_module.h"
+#endif
+
 LOG_MODULE_REGISTER(mqtt_module, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
 /* MQTT client instance */
@@ -87,6 +91,12 @@ static int reconnect_attempts = 0;
 #define MAX_RECONNECT_INTERVAL_MS 300000  /* 5 minutes maximum */
 #define RECONNECT_BACKOFF_MULTIPLIER 2    /* Double the interval each failure */
 #define MAX_RECONNECT_ATTEMPTS 10         /* Maximum attempts before requiring manual intervention */
+
+/* Broker fallback state */
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+static bool using_fallback_broker = false;
+static int primary_broker_attempts = 0;
+#endif
 
 /* Event handler callback */
 static mqtt_event_handler_t event_handler = NULL;
@@ -178,6 +188,14 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
 #endif
             reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
             reconnect_attempts = 0;
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+            /* Log which broker we successfully connected to */
+            if (using_fallback_broker) {
+                LOG_INF("Successfully connected to fallback broker");
+            } else {
+                LOG_INF("Successfully connected to primary broker");
+            }
+#endif
             
             /* Call the event handler if registered */
             if (event_handler) {
@@ -190,6 +208,15 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         LOG_WRN("MQTT disconnected: %d", evt->result);
         mqtt_connected = false;
         /* Note: Automatic reconnection could be implemented here if needed */
+        
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+        /* Reset to primary broker on disconnect so we always try local first */
+        if (using_fallback_broker) {
+            LOG_INF("Disconnected from fallback broker, will retry primary broker first");
+            using_fallback_broker = false;
+            primary_broker_attempts = 0;
+        }
+#endif
         
 #ifdef CONFIG_RPR_MODULE_INIT_SM
         /* Notify state machine of disconnection */
@@ -710,6 +737,40 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
             
             /* Attempt auto-reconnection if enough time has passed */
             if (current_time - last_reconnect_attempt >= reconnect_interval_ms) {
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+                /* Check if we should try fallback broker */
+                if (!using_fallback_broker && 
+                    primary_broker_attempts >= CONFIG_RPR_MQTT_PRIMARY_RETRIES) {
+                    
+                    /* Check if modem is available for public broker */
+#ifdef CONFIG_RPR_MODEM
+                    if (is_modem_connected()) {
+                        LOG_WRN("Primary broker failed %d times, switching to fallback broker",
+                                primary_broker_attempts);
+                        using_fallback_broker = true;
+                        reconnect_attempts = 0;
+                        reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+                        
+                        /* Set modem interface as default for public connectivity */
+                        modem_set_iface_default();
+                    } else {
+                        LOG_ERR("Cannot use fallback broker: modem not connected");
+                        LOG_INF("Attempting to initialize modem for fallback connection...");
+                        c16qs_modem_status_t modem_status = modem_init_and_connect();
+                        if (modem_status == MODEM_SUCCESS) {
+                            LOG_INF("Modem initialized successfully, will retry fallback");
+                        } else {
+                            LOG_ERR("Modem initialization failed: %d", modem_status);
+                        }
+                    }
+#else
+                    LOG_ERR("Fallback broker requires modem, but modem support is disabled");
+                    auto_reconnect_enabled = false;
+                    continue;
+#endif /* CONFIG_RPR_MODEM */
+                }
+#endif /* CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED */
+
                 LOG_INF("Auto-reconnecting to MQTT broker (attempt %d/%d, wait %d ms)...", 
                         reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS, reconnect_interval_ms);
                 ret = mqtt_internal_connect();
@@ -721,9 +782,17 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                     /* Reset backoff on successful connection attempt */
                     reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
                     reconnect_attempts = 0;
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+                    primary_broker_attempts = 0;  /* Reset primary attempts on successful connection */
+#endif
                 } else {
                     /* Connection failed, apply exponential backoff */
                     reconnect_attempts++;
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+                    if (!using_fallback_broker) {
+                        primary_broker_attempts++;
+                    }
+#endif
                     reconnect_interval_ms = reconnect_interval_ms * RECONNECT_BACKOFF_MULTIPLIER;
                     if (reconnect_interval_ms > MAX_RECONNECT_INTERVAL_MS) {
                         reconnect_interval_ms = MAX_RECONNECT_INTERVAL_MS;
@@ -820,15 +889,32 @@ static int prepare_mqtt_client(void)
 {
     struct sockaddr_in *broker4 = (struct sockaddr_in *)&broker;
     int ret;
+    const char *broker_host;
+    int broker_port;
+
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+    /* Select broker based on fallback state */
+    if (using_fallback_broker) {
+        broker_host = CONFIG_RPR_MQTT_FALLBACK_BROKER_HOST;
+        broker_port = CONFIG_RPR_MQTT_FALLBACK_BROKER_PORT;
+        LOG_INF("Using fallback MQTT broker: %s:%d", broker_host, broker_port);
+    } else {
+        broker_host = CONFIG_RPR_MQTT_BROKER_HOST;
+        broker_port = CONFIG_RPR_MQTT_BROKER_PORT;
+        LOG_INF("Using primary MQTT broker: %s:%d", broker_host, broker_port);
+    }
+#else
+    broker_host = CONFIG_RPR_MQTT_BROKER_HOST;
+    broker_port = CONFIG_RPR_MQTT_BROKER_PORT;
+#endif
 
     /* Configure broker address */
     broker4->sin_family = AF_INET;
-    broker4->sin_port = htons(CONFIG_RPR_MQTT_BROKER_PORT);
+    broker4->sin_port = htons(broker_port);
     
-    ret = zsock_inet_pton(AF_INET, CONFIG_RPR_MQTT_BROKER_HOST, 
-                         &broker4->sin_addr);
+    ret = zsock_inet_pton(AF_INET, broker_host, &broker4->sin_addr);
     if (ret != 1) {
-        LOG_ERR("Invalid broker IP address: %s", CONFIG_RPR_MQTT_BROKER_HOST);
+        LOG_ERR("Invalid broker IP address: %s", broker_host);
         return -EINVAL;
     }
 

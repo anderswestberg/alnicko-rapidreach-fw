@@ -68,6 +68,35 @@ config RPR_MQTT_PASSWORD
     help
       Password for authenticating to the MQTT broker. Leave unset for anonymous.
 
+config RPR_MQTT_FALLBACK_BROKER_ENABLED
+    bool "Enable fallback MQTT broker"
+    default n
+    help
+      Enable fallback to a secondary MQTT broker if primary broker fails.
+
+config RPR_MQTT_FALLBACK_BROKER_HOST
+    string "Fallback MQTT broker hostname or IP"
+    default "37.123.169.250"
+    depends on RPR_MQTT_FALLBACK_BROKER_ENABLED
+    help
+      The hostname or IP address of the fallback MQTT broker (e.g., public cloud broker).
+
+config RPR_MQTT_FALLBACK_BROKER_PORT
+    int "Fallback MQTT broker port"
+    range 1 65535
+    default 1883
+    depends on RPR_MQTT_FALLBACK_BROKER_ENABLED
+    help
+      The port number of the fallback MQTT broker.
+
+config RPR_MQTT_PRIMARY_RETRIES
+    int "Number of retries before using fallback broker"
+    range 1 20
+    default 5
+    depends on RPR_MQTT_FALLBACK_BROKER_ENABLED
+    help
+      Number of connection attempts to primary broker before falling back to secondary.
+
 rsource "Kconfig.mqtt_wrapper"
 
 endif # RPR_MODULE_MQTT

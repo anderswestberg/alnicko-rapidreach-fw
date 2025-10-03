@@ -4,7 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recha
 import DevicesIcon from '@mui/icons-material/Devices';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
-import BusinessIcon from '@mui/icons-material/Business';
+// import BusinessIcon from '@mui/icons-material/Business';
 import { getDeviceStats } from './dataProvider';
 
 interface DeviceStats {
