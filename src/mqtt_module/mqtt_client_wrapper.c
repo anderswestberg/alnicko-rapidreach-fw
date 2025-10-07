@@ -17,14 +17,27 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/net/dns_resolve.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/kernel/thread_stack.h>
 #include <string.h>
 #include <errno.h>
 
 LOG_MODULE_REGISTER(mqtt_wrapper, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
-/* Stack definitions - must be outside struct */
-K_THREAD_STACK_DEFINE(mqtt_protocol_stack, CONFIG_MQTT_WRAPPER_PROTOCOL_STACK_SIZE);
-K_THREAD_STACK_DEFINE(mqtt_worker_stack, CONFIG_MQTT_WRAPPER_WORKER_STACK_SIZE);
+/* Utility allocation helpers for thread stacks */
+static void *alloc_thread_stack_mem(size_t requested_size)
+{
+    size_t bytes = K_KERNEL_STACK_LEN(requested_size);
+    void *mem = k_aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN, bytes);
+    if (mem) {
+        memset(mem, 0, bytes);
+    }
+    return mem;
+}
+
+/* Stack definitions moved into wrapper struct to support multiple instances
+ * Old design had global stacks which caused corruption when multiple wrappers were created */
 
 /* Message entry for work queue */
 struct mqtt_msg_work {
@@ -53,6 +66,12 @@ struct mqtt_client_wrapper {
     
     /* Worker queue for message processing */
     struct k_work_q msg_work_queue;
+    
+    /* PER-INSTANCE thread stacks - dynamically allocated to avoid struct size issues */
+    k_thread_stack_t *protocol_stack;
+    k_thread_stack_t *worker_stack;
+    void *protocol_stack_mem;
+    void *worker_stack_mem;
     
     /* Connection state */
     struct k_mutex state_mutex;
@@ -91,6 +110,14 @@ static void process_message_work(struct k_work *work)
     
     LOG_DBG("Processing message from topic: %s (%zu bytes)", 
             msg_work->topic, msg_work->payload_len);
+
+    /* Safety check - don't call callback with NULL payload */
+    if (!msg_work->payload) {
+        LOG_ERR("NULL payload in work item (len=%zu) - dropping message", 
+                msg_work->payload_len);
+        k_free(msg_work);
+        return;
+    }
     
     /* Call the application callback */
     if (msg_work->callback) {
@@ -123,6 +150,29 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
         LOG_ERR("Failed to allocate wrapper");
         return NULL;
     }
+    
+    /* Allocate per-instance thread stacks with proper alignment */
+    w->protocol_stack_mem = alloc_thread_stack_mem(CONFIG_MQTT_WRAPPER_PROTOCOL_STACK_SIZE);
+    if (!w->protocol_stack_mem) {
+        LOG_ERR("Failed to allocate protocol stack (%zu bytes)",
+                (size_t)K_KERNEL_STACK_LEN(CONFIG_MQTT_WRAPPER_PROTOCOL_STACK_SIZE));
+        k_free(w);
+        return NULL;
+    }
+    w->protocol_stack = (k_thread_stack_t *)w->protocol_stack_mem;
+    
+    w->worker_stack_mem = alloc_thread_stack_mem(CONFIG_MQTT_WRAPPER_WORKER_STACK_SIZE);
+    if (!w->worker_stack_mem) {
+        LOG_ERR("Failed to allocate worker stack (%zu bytes)",
+                (size_t)K_KERNEL_STACK_LEN(CONFIG_MQTT_WRAPPER_WORKER_STACK_SIZE));
+        k_free(w->protocol_stack_mem);
+        k_free(w);
+        return NULL;
+    }
+    w->worker_stack = (k_thread_stack_t *)w->worker_stack_mem;
+    
+    LOG_INF("Allocated per-instance stacks: protocol=%p, worker=%p",
+            (void*)w->protocol_stack, (void*)w->worker_stack);
     
     /* Initialize mutex */
     k_mutex_init(&w->state_mutex);
@@ -168,11 +218,11 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     w->client.clean_session = config->clean_session ? 1 : 0;
     w->client.user_data = w;
     
-    /* Initialize work queue */
+    /* Initialize work queue with PER-INSTANCE stack */
     k_work_queue_init(&w->msg_work_queue);
     k_work_queue_start(&w->msg_work_queue,
-                       mqtt_worker_stack,
-                       K_THREAD_STACK_SIZEOF(mqtt_worker_stack),
+                       w->worker_stack,
+                       CONFIG_MQTT_WRAPPER_WORKER_STACK_SIZE,
                        CONFIG_MQTT_WRAPPER_WORKER_THREAD_PRIORITY,
                        NULL);
     k_thread_name_set(&w->msg_work_queue.thread, "mqtt_worker");
@@ -281,19 +331,17 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
 static void mqtt_evt_handler(struct mqtt_client *const client,
                              const struct mqtt_evt *evt)
 {
-    /* Safety checks - use printk for immediate unbuffered output */
+    /* Safety checks */
     if (!client || !evt) {
-        printk("FATAL: NULL client=%p or evt=%p\n", (void*)client, (void*)evt);
+        LOG_ERR("NULL client or evt in event handler");
         return;
     }
     
     struct mqtt_client_wrapper *w = (struct mqtt_client_wrapper *)client->user_data;
     if (!w) {
-        printk("FATAL: NULL wrapper\n");
+        LOG_ERR("NULL wrapper user_data");
         return;
     }
-    
-    printk("EVT: type=%d\n", evt->type);  /* Unbuffered for crash debugging */
     
     switch (evt->type) {
     case MQTT_EVT_CONNACK:
@@ -349,8 +397,102 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         break;
         
     case MQTT_EVT_PUBLISH:
-        /* CRITICAL: Even entering this case with ANY code causes hard fault
-         * Stack is severely corrupted - disable MQTT wrapper v2 completely */
+        {
+            const struct mqtt_publish_param *pub = &evt->param.publish;
+            
+            /* Send PUBACK immediately */
+            if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+                struct mqtt_puback_param puback = {
+                    .message_id = pub->message_id
+                };
+                mqtt_publish_qos1_ack(client, &puback);
+            }
+            
+            /* Extract topic */
+            char topic[128];
+            size_t topic_len = MIN(pub->message.topic.topic.size, sizeof(topic) - 1);
+            memcpy(topic, pub->message.topic.topic.utf8, topic_len);
+            topic[topic_len] = '\0';
+            
+            /* Find handler */
+            mqtt_msg_received_cb_t handler = NULL;
+            void *user_data = NULL;
+            
+            for (int i = 0; i < CONFIG_MQTT_WRAPPER_MAX_SUBSCRIPTIONS; i++) {
+                if (w->subs[i].active && 
+                    strcmp(w->subs[i].topic, topic) == 0) {
+                    handler = w->subs[i].handler;
+                    user_data = w->subs[i].user_data;
+                    break;
+                }
+            }
+            
+            if (handler && pub->message.payload.len > 0) {
+                /* For small messages (< 8KB), use in-memory buffer for simplicity */
+                if (pub->message.payload.len <= 8192) {
+                    /* Allocate work item */
+                    struct mqtt_msg_work *work = k_malloc(sizeof(*work));
+                    if (work) {
+                        strncpy(work->topic, topic, sizeof(work->topic) - 1);
+                        work->callback = handler;
+                        work->user_data = user_data;
+                        
+                        /* Allocate and read payload */
+                        work->payload = k_malloc(pub->message.payload.len);
+                        if (work->payload) {
+                            int ret = mqtt_read_publish_payload_blocking(
+                                client, work->payload, pub->message.payload.len);
+                            if (ret >= 0) {
+                                work->payload_len = pub->message.payload.len;
+                                k_work_init(&work->work, process_message_work);
+                                int submit_ret = k_work_submit_to_queue(&w->msg_work_queue, &work->work);
+                                if (submit_ret < 0) {
+                                    LOG_ERR("Failed to submit work: %d", submit_ret);
+                                    k_free(work->payload);
+                                    k_free(work);
+                                }
+                            } else {
+                                LOG_ERR("Failed to read payload: %d", ret);
+                                k_free(work->payload);
+                                k_free(work);
+                            }
+                        } else {
+                            LOG_ERR("Failed to allocate %zu bytes for payload", pub->message.payload.len);
+                            k_free(work);
+                            /* Consume payload */
+                            uint8_t discard[512];
+                            size_t remaining = pub->message.payload.len;
+                            while (remaining > 0) {
+                                size_t chunk = MIN(remaining, sizeof(discard));
+                                mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                remaining -= chunk;
+                            }
+                        }
+                    } else {
+                        LOG_ERR("Failed to allocate work item");
+                        /* Consume payload */
+                        uint8_t discard[512];
+                        size_t remaining = pub->message.payload.len;
+                        while (remaining > 0) {
+                            size_t chunk = MIN(remaining, sizeof(discard));
+                            mqtt_read_publish_payload_blocking(client, discard, chunk);
+                            remaining -= chunk;
+                        }
+                    }
+                } else {
+                    /* Large message - just consume it for now */
+                    LOG_WRN("Large audio message (%u bytes) - discarding (streaming not yet implemented)", 
+                            pub->message.payload.len);
+                    uint8_t discard[512];
+                    size_t remaining = pub->message.payload.len;
+                    while (remaining > 0) {
+                        size_t chunk = MIN(remaining, sizeof(discard));
+                        mqtt_read_publish_payload_blocking(client, discard, chunk);
+                        remaining -= chunk;
+                    }
+                }
+            }
+        }
         break;
         
     default:
@@ -374,14 +516,14 @@ int mqtt_client_connect(mqtt_handle_t handle,
     w->conn_cb = conn_cb;
     w->conn_cb_data = user_data;
     
-    /* Start protocol thread */
+    /* Start protocol thread with PER-INSTANCE stack */
     if (!w->thread_running) {
         w->thread_running = true;
         w->should_stop = false;
         w->protocol_thread_id = k_thread_create(
             &w->protocol_thread,
-            mqtt_protocol_stack,
-            K_THREAD_STACK_SIZEOF(mqtt_protocol_stack),
+            w->protocol_stack,
+            CONFIG_MQTT_WRAPPER_PROTOCOL_STACK_SIZE,
             protocol_thread_func,
             w, NULL, NULL,
             CONFIG_MQTT_WRAPPER_PROTOCOL_THREAD_PRIORITY,
@@ -595,6 +737,14 @@ void mqtt_client_deinit(mqtt_handle_t handle)
     
     /* Stop work queue */
     k_work_queue_drain(&w->msg_work_queue, false);
+    
+    /* Free per-instance stacks */
+    if (w->protocol_stack_mem) {
+        k_free(w->protocol_stack_mem);
+    }
+    if (w->worker_stack_mem) {
+        k_free(w->worker_stack_mem);
+    }
     
     /* Free wrapper */
     k_free(w);

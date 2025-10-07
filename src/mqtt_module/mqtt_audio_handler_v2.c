@@ -60,19 +60,23 @@ static void mqtt_audio_alert_handler_v2(const char *topic,
     mqtt_parsed_message_t parsed_msg;
     int ret;
     
-    LOG_INF("Audio alert received on %s (%zu bytes)", topic, payload_len);
-    
-    /* Parse JSON metadata */
-    ret = mqtt_parse_json_only((const char *)payload, payload_len, &parsed_msg);
-    if (ret < 0) {
-        LOG_ERR("Failed to parse JSON metadata: %d", ret);
+    /* Check for NULL payload */
+    if (!payload || payload_len < 4) {
+        LOG_ERR("Invalid payload (len=%zu)", payload_len);
         return;
     }
     
-    LOG_INF("Audio metadata - Volume: %d%%, Priority: %d, PlayCount: %d",
-            parsed_msg.metadata.volume, 
-            parsed_msg.metadata.priority,
-            parsed_msg.metadata.play_count);
+    /* Check if this is a test ping (no opusDataSize field) */
+    if (payload_len < 100) {
+        LOG_INF("Test ping OK");
+        return;
+    }
+    
+    /* Parse MQTT message ([4-byte hex len][JSON][Opus data]) */
+    ret = mqtt_parse_message(payload, payload_len, &parsed_msg);
+    if (ret < 0) {
+        return;
+    }
     
     /* Generate temp filename for audio */
     char temp_filename[64];
@@ -81,23 +85,13 @@ static void mqtt_audio_alert_handler_v2(const char *topic,
     
     /* Check if we have audio data in the message */
     if (parsed_msg.metadata.opus_data_size > 0) {
-        /* Parse the full message to get opus data */
-        mqtt_parsed_message_t full_msg;
-        ret = mqtt_parse_message(payload, payload_len, &full_msg);
-        if (ret == 0 && full_msg.opus_data_len > 0) {
+        if (parsed_msg.opus_data && parsed_msg.opus_data_len > 0) {
             /* Save audio data to file */
-            LOG_INF("Saving audio data (%u bytes) to %s", 
-                    full_msg.opus_data_len, temp_filename);
-            
-            ret = file_manager_write(temp_filename, full_msg.opus_data, 
-                                   full_msg.opus_data_len);
+            ret = file_manager_write(temp_filename, parsed_msg.opus_data, 
+                                   parsed_msg.opus_data_len);
             if (ret < 0) {
-                LOG_ERR("Failed to save audio file: %d", ret);
                 return;
             }
-        } else {
-            LOG_ERR("Failed to parse full message for audio data: %d", ret);
-            return;
         }
     }
     
@@ -113,21 +107,9 @@ static void mqtt_audio_alert_handler_v2(const char *topic,
     strncpy(item.filename, temp_filename, sizeof(item.filename) - 1);
     
     ret = audio_queue_add(&item);
-    if (ret == 0) {
-        LOG_INF("Audio queued successfully: %s", temp_filename);
-    } else {
-        LOG_ERR("Failed to queue audio: %d", ret);
-        /* Clean up temp file on error */
+    if (ret != 0) {
         file_manager_delete(temp_filename);
     }
-    
-    /* Send acknowledgment */
-    char ack_topic[128];
-    snprintf(ack_topic, sizeof(ack_topic), "%s/ack", topic);
-    const char *ack = "{\"status\":\"received\",\"handler\":\"v2\"}";
-    mqtt_client_publish(mqtt_client, ack_topic,
-                       (uint8_t *)ack, strlen(ack),
-                       MQTT_QOS_0_AT_MOST_ONCE, false);
 }
 
 /* Header declaration for mqtt_audio_handler_v2.h functionality */
@@ -139,6 +121,7 @@ void mqtt_audio_handler_v2_test(void);
  */
 int mqtt_audio_handler_v2_init(void)
 {
+    int ret;
     size_t device_id_len;
     const char *device_id = dev_info_get_device_id_str(&device_id_len);
     if (!device_id || device_id_len == 0) {
@@ -151,7 +134,18 @@ int mqtt_audio_handler_v2_init(void)
              "rapidreach/audio/%s", device_id);
     
     LOG_INF("Initializing MQTT audio handler v2");
+    printk("INIT1\n");
     LOG_INF("Audio alert topic: %s", audio_alert_topic);
+    printk("INIT2\n");
+    
+    /* Initialize audio queue and playback thread */
+    printk("INIT3\n");
+    ret = audio_queue_init();
+    printk("INIT4\n");
+    if (ret < 0) {
+        LOG_ERR("Failed to initialize audio queue: %d", ret);
+        return ret;
+    }
     
     /* Configure MQTT client with unique ID for wrapper test */
     char wrapper_client_id[64];
@@ -173,7 +167,7 @@ int mqtt_audio_handler_v2_init(void)
     }
     
     /* Connect */
-    int ret = mqtt_client_connect(mqtt_client, mqtt_conn_callback, NULL);
+    ret = mqtt_client_connect(mqtt_client, mqtt_conn_callback, NULL);
     if (ret < 0) {
         LOG_ERR("Failed to initiate connection: %d", ret);
         return ret;

@@ -94,6 +94,36 @@ export const AudioAlerts = () => {
     }
   };
 
+  const handleTestPing = async () => {
+    if (!selectedDevice) {
+      notify('Please select a device', { type: 'error' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/audio/ping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY,
+        },
+        body: JSON.stringify({ deviceId: selectedDevice }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Ping failed');
+      }
+
+      notify('Test ping sent successfully', { type: 'success' });
+    } catch (error: any) {
+      notify(error.message || 'Failed to send ping', { type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!selectedDevice || !selectedFile) {
       notify('Please select a device and audio file', { type: 'error' });
@@ -333,6 +363,17 @@ export const AudioAlerts = () => {
                   fullWidth
                 />
               )}
+
+              {/* Test Ping Button */}
+              <Button
+                variant="outlined"
+                color="secondary"
+                onClick={handleTestPing}
+                disabled={loading || !selectedDevice}
+                startIcon={<PlayArrowIcon />}
+              >
+                Test Ping (No Audio)
+              </Button>
 
               {/* Upload Progress */}
               {loading && (

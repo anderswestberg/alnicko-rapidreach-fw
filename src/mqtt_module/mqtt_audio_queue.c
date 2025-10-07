@@ -25,22 +25,25 @@ LOG_MODULE_REGISTER(audio_queue, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
 /* Audio queue configuration */
 #define AUDIO_QUEUE_SIZE 10
-#define AUDIO_THREAD_STACK_SIZE 2048
+#define AUDIO_THREAD_STACK_SIZE 8096
 #define AUDIO_THREAD_PRIORITY 5
 
 /* Message queue for audio items */
 K_MSGQ_DEFINE(audio_msgq, sizeof(struct audio_queue_item), AUDIO_QUEUE_SIZE, 4);
 
-/* Audio playback thread */
-K_THREAD_STACK_DEFINE(audio_thread_stack, AUDIO_THREAD_STACK_SIZE);
-static struct k_thread audio_thread;
-static k_tid_t audio_thread_id = NULL;
-
 /* State tracking */
 static bool audio_initialized = false;
 static bool currently_playing = false;
 static bool should_stop = false;
-static struct k_mutex state_mutex;
+K_MUTEX_DEFINE(state_mutex);
+
+/* Forward declaration */
+static void audio_playback_thread(void *p1, void *p2, void *p3);
+
+/* Audio playback thread - statically defined */
+K_THREAD_DEFINE(audio_queue_thread, AUDIO_THREAD_STACK_SIZE,
+                audio_playback_thread, NULL, NULL, NULL,
+                AUDIO_THREAD_PRIORITY, 0, 0);
 
 /**
  * @brief Audio playback thread function
@@ -257,28 +260,10 @@ static void audio_playback_thread(void *p1, void *p2, void *p3)
 
 int audio_queue_init(void)
 {
-    if (audio_thread_id != NULL) {
-        LOG_WRN("Audio queue already initialized");
-        return 0;
-    }
+    /* Thread and mutex are now statically created */
+    /* Nothing to do at runtime - already initialized */
     
-    k_mutex_init(&state_mutex);
-    
-    /* Create audio playback thread */
-    audio_thread_id = k_thread_create(&audio_thread,
-                                      audio_thread_stack,
-                                      K_THREAD_STACK_SIZEOF(audio_thread_stack),
-                                      audio_playback_thread,
-                                      NULL, NULL, NULL,
-                                      AUDIO_THREAD_PRIORITY, 0, K_NO_WAIT);
-    
-    if (audio_thread_id == NULL) {
-        LOG_ERR("Failed to create audio playback thread");
-        return -ENOMEM;
-    }
-    
-    k_thread_name_set(audio_thread_id, "audio_queue");
-    LOG_INF("Audio queue initialized");
+    LOG_INF("Audio queue initialized (thread auto-started)");
     
     return 0;
 }
@@ -294,12 +279,12 @@ int audio_queue_add(const struct audio_queue_item *item)
     /* Try to add to queue */
     ret = k_msgq_put(&audio_msgq, item, K_NO_WAIT);
     if (ret != 0) {
-        LOG_ERR("Audio queue full, dropping message");
+        LOG_ERR("Audio queue full");
         return -ENOMEM;
     }
-    
-    LOG_INF("Added audio to queue: %s (queue depth: %d/%d)", 
-            item->filename, k_msgq_num_used_get(&audio_msgq), AUDIO_QUEUE_SIZE);
+    //LOG_INF("Added audio to queue: %s (queue depth: %d/%d)", 
+            //item->filename, k_msgq_num_used_get(&audio_msgq), AUDIO_QUEUE_SIZE);
+    LOG_INF("Audio queued successfully");
     
     return 0;
 }

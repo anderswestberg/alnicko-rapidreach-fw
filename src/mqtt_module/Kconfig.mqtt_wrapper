@@ -20,17 +20,17 @@ config MQTT_WRAPPER_PROTOCOL_STACK_SIZE
 
 config MQTT_WRAPPER_WORKER_STACK_SIZE
     int "Worker thread stack size"
-    default 12288
+    default 16384
     help
       Stack size for the worker thread that processes received messages.
-      Should be large enough to handle file I/O and message callbacks.
+      Should be large enough to handle file I/O, JSON parsing, and message callbacks.
 
 config MQTT_WRAPPER_RX_BUFFER_SIZE
     int "MQTT receive buffer size"
-    default 4096
+    default 8192
     help
-      Size of the buffer for receiving MQTT messages. Should be large
-      enough to handle expected message sizes.
+      Size of the buffer for receiving MQTT messages. Limited to 8KB
+      since larger audio files should use streaming instead of in-memory.
 
 config MQTT_WRAPPER_TX_BUFFER_SIZE
     int "MQTT transmit buffer size"

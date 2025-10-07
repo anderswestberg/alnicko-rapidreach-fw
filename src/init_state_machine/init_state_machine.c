@@ -20,7 +20,7 @@
 
 #ifdef CONFIG_RPR_MODULE_MQTT
 #include "../mqtt_module/mqtt_module.h"
-#include "../mqtt_module/mqtt_audio_handler.h"
+/* Old audio handler removed - using mqtt_audio_handler_v2 via mqtt_wrapper */
 #endif
 
 #ifdef CONFIG_RPR_MQTT_LOG_CLIENT
@@ -414,13 +414,9 @@ static void state_operational_entry(init_sm_context_t *ctx, init_event_t event)
         LOG_ERR("Failed to initialize MQTT wrapper test: %d", ret);
     }
 #else
-    /* Initialize old MQTT audio handler */
-    int ret = mqtt_audio_handler_init();
-    if (ret == 0) {
-        LOG_INF("MQTT audio handler initialized successfully");
-    } else {
-        LOG_ERR("Failed to initialize MQTT audio handler: %d", ret);
-    }
+    /* Old MQTT audio handler (mqtt_audio_handler.c) has been removed */
+    /* Always use mqtt_wrapper with mqtt_audio_handler_v2.c */
+    LOG_WRN("CONFIG_RPR_MQTT_CLIENT_WRAPPER must be enabled for audio alerts");
 #endif
     
     /* Initialize MQTT log client if enabled */

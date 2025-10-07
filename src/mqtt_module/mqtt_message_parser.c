@@ -4,24 +4,16 @@
  */
 
 #include "mqtt_message_parser.h"
+#include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/data/json.h>
+#include <zephyr/sys/printk.h>
 
 LOG_MODULE_REGISTER(mqtt_parser, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 
-/* JSON parsing descriptors for Zephyr's JSON library */
-static const struct json_obj_descr metadata_descr[] = {
-    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "opusDataSize", opus_data_size, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "priority", priority, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "saveToFile", save_to_file, JSON_TOK_TRUE),
-    JSON_OBJ_DESCR_ARRAY_NAMED(mqtt_message_metadata_t, "filename", filename, 64, filename, JSON_TOK_STRING),
-    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "playCount", play_count, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "volume", volume, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM_NAMED(mqtt_message_metadata_t, "interruptCurrent", interrupt_current, JSON_TOK_TRUE),
-};
+/* Using cJSON library instead of Zephyr's JSON parser for better compatibility */
 
 int mqtt_parse_json_only(const char *json_str, size_t json_len,
                         mqtt_parsed_message_t *parsed_msg)
@@ -52,15 +44,16 @@ int mqtt_parse_json_only(const char *json_str, size_t json_len,
     return MQTT_PARSER_SUCCESS;
 }
 
+/* Static buffer to avoid stack overflow (1KB+ is too much for worker thread stack) */
+static char json_parse_buffer[MQTT_MSG_MAX_JSON_HEADER_SIZE + 1];
+
 int mqtt_parse_message(const uint8_t *payload, size_t payload_len, 
                       mqtt_parsed_message_t *parsed_msg)
 {
     const uint8_t *json_end = NULL;
     int json_len;
-    char json_buffer[MQTT_MSG_MAX_JSON_HEADER_SIZE + 1];
     
     if (!payload || !parsed_msg || payload_len == 0) {
-        LOG_ERR("Invalid parameters");
         return MQTT_PARSER_ERR_INVALID_PARAM;
     }
     
@@ -69,24 +62,28 @@ int mqtt_parse_message(const uint8_t *payload, size_t payload_len,
     
     /* Extract JSON header */
     json_len = mqtt_extract_json_header(payload, payload_len, &json_end);
+    
     if (json_len < 0) {
-        LOG_ERR("Failed to extract JSON header: %d", json_len);
+        printk("X_err\n");
         return json_len;
     }
     
     if (json_len > MQTT_MSG_MAX_JSON_HEADER_SIZE) {
-        LOG_ERR("JSON header too long: %d bytes", json_len);
+        printk("X_big\n");
         return MQTT_PARSER_ERR_JSON_TOO_LONG;
     }
     
-    /* Copy JSON to null-terminated buffer */
-    memcpy(json_buffer, payload, json_len);
-    json_buffer[json_len] = '\0';
+    /* Copy JSON to null-terminated buffer (skip 4-byte length prefix) */
+    if (json_len >= sizeof(json_parse_buffer) || json_len <= 0) {
+        return MQTT_PARSER_ERR_JSON_TOO_LONG;
+    }
     
-    LOG_DBG("Extracted JSON header (%d bytes): %s", json_len, json_buffer);
+    /* Copy JSON data */
+    memcpy(json_parse_buffer, payload + 4, json_len);
+    json_parse_buffer[json_len] = '\0';
     
     /* Parse JSON metadata */
-    int ret = mqtt_parse_json_metadata(json_buffer, &parsed_msg->metadata);
+    int ret = mqtt_parse_json_metadata(json_parse_buffer, &parsed_msg->metadata);
     if (ret < 0) {
         LOG_ERR("Failed to parse JSON metadata: %d", ret);
         return ret;
@@ -95,8 +92,8 @@ int mqtt_parse_message(const uint8_t *payload, size_t payload_len,
     /* Store JSON header size */
     parsed_msg->metadata.json_header_size = json_len;
     
-    /* Calculate Opus data position and validate size */
-    size_t opus_offset = json_len;
+    /* Calculate Opus data position and validate size (4-byte prefix + JSON) */
+    size_t opus_offset = 4 + json_len;
     size_t remaining_len = payload_len - opus_offset;
     
     if (remaining_len < parsed_msg->metadata.opus_data_size) {
@@ -128,84 +125,128 @@ int mqtt_parse_message(const uint8_t *payload, size_t payload_len,
 int mqtt_extract_json_header(const uint8_t *payload, size_t payload_len, 
                             const uint8_t **json_end)
 {
-    int brace_count = 0;
-    bool in_string = false;
-    bool escape_next = false;
-    size_t i;
-    
-    if (!payload || payload_len < 2) {
+    /* New protocol: first 4 bytes are hex length of JSON */
+    if (payload_len < 4) {
         return MQTT_PARSER_ERR_TOO_SHORT;
     }
     
-    /* JSON must start with '{' */
-    if (payload[0] != '{') {
-        LOG_ERR("Payload does not start with JSON object");
+    /* Parse 4-byte hex length prefix */
+    char len_str[5];
+    memcpy(len_str, payload, 4);
+    len_str[4] = '\0';
+    
+    char *endptr;
+    unsigned long json_len = strtoul(len_str, &endptr, 16);
+    
+    if (endptr != len_str + 4) {
+        LOG_ERR("Invalid length prefix: %.4s", len_str);
+        return MQTT_PARSER_ERR_INVALID_JSON;
+    }
+    
+    if (json_len > MQTT_MSG_MAX_JSON_HEADER_SIZE) {
+        LOG_ERR("JSON header too long: %lu bytes", json_len);
+        return MQTT_PARSER_ERR_JSON_TOO_LONG;
+    }
+    
+    if (payload_len < 4 + json_len) {
+        LOG_ERR("Payload too short for JSON: need %lu, have %zu", 4 + json_len, payload_len);
+        return MQTT_PARSER_ERR_TOO_SHORT;
+    }
+    
+    /* Verify JSON starts after length prefix */
+    if (payload[4] != '{') {
+        LOG_ERR("JSON doesn't start with '{' at offset 4");
         return MQTT_PARSER_ERR_NO_JSON;
     }
     
-    /* Find the end of JSON by counting braces, respecting string literals */
-    for (i = 0; i < payload_len && i < MQTT_MSG_MAX_JSON_HEADER_SIZE; i++) {
-        char c = (char)payload[i];
-        
-        if (escape_next) {
-            escape_next = false;
-            continue;
-        }
-        
-        if (c == '\\') {
-            escape_next = true;
-            continue;
-        }
-        
-        if (c == '"' && !escape_next) {
-            in_string = !in_string;
-            continue;
-        }
-        
-        if (!in_string) {
-            if (c == '{') {
-                brace_count++;
-            } else if (c == '}') {
-                brace_count--;
-                if (brace_count == 0) {
-                    /* Found end of JSON object */
-                    if (json_end) {
-                        *json_end = payload + i + 1;
-                    }
-                    return i + 1;  /* Return length including closing brace */
-                }
-            }
-        }
+    if (json_end) {
+        *json_end = payload + 4 + json_len;
     }
     
-    LOG_ERR("No valid JSON object found in first %d bytes", i);
-    return MQTT_PARSER_ERR_INVALID_JSON;
+    return (int)json_len;
 }
 
 int mqtt_parse_json_metadata(const char *json_str, 
                             mqtt_message_metadata_t *metadata)
 {
-    int ret;
-    
     if (!json_str || !metadata) {
         return MQTT_PARSER_ERR_INVALID_PARAM;
     }
     
     /* Set defaults */
     memset(metadata, 0, sizeof(mqtt_message_metadata_t));
-    metadata->priority = 5;        /* Default medium priority */
-    metadata->play_count = 1;      /* Play once by default */
-    metadata->volume = 40;         /* 40% volume by default */
+    metadata->priority = 5;
+    metadata->play_count = 1;
+    metadata->volume = 40;
     metadata->interrupt_current = false;
     metadata->save_to_file = false;
     
-    /* Parse JSON using Zephyr's JSON library */
-    ret = json_obj_parse((char *)json_str, strlen(json_str),
-                        metadata_descr, ARRAY_SIZE(metadata_descr),
-                        metadata);
+    /* Parse JSON using cJSON library */
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) {
+        LOG_ERR("cJSON parse failed");
+        return MQTT_PARSER_ERR_INVALID_JSON;
+    }
+    
+    /* Extract required field: opusDataSize */
+    cJSON *size = cJSON_GetObjectItem(root, "opusDataSize");
+    if (cJSON_IsNumber(size)) {
+        metadata->opus_data_size = (uint32_t)size->valuedouble;
+    }
+    
+    /* Extract optional fields */
+    cJSON *priority = cJSON_GetObjectItem(root, "priority");
+    if (cJSON_IsNumber(priority)) {
+        metadata->priority = (uint8_t)priority->valuedouble;
+    }
+    
+    cJSON *volume = cJSON_GetObjectItem(root, "volume");
+    if (cJSON_IsNumber(volume)) {
+        metadata->volume = (uint32_t)volume->valuedouble;
+        if (metadata->volume > 100) {
+            metadata->volume = 100;
+        }
+    }
+    
+    cJSON *playCount = cJSON_GetObjectItem(root, "playCount");
+    if (cJSON_IsNumber(playCount)) {
+        metadata->play_count = (uint32_t)playCount->valuedouble;
+    }
+    
+    cJSON *saveToFile = cJSON_GetObjectItem(root, "saveToFile");
+    if (cJSON_IsBool(saveToFile)) {
+        metadata->save_to_file = cJSON_IsTrue(saveToFile);
+    }
+    
+    cJSON *interruptCurrent = cJSON_GetObjectItem(root, "interruptCurrent");
+    if (cJSON_IsBool(interruptCurrent)) {
+        metadata->interrupt_current = cJSON_IsTrue(interruptCurrent);
+    }
+    
+    cJSON *filename = cJSON_GetObjectItem(root, "filename");
+    if (cJSON_IsString(filename) && filename->valuestring) {
+        strncpy(metadata->filename, filename->valuestring, sizeof(metadata->filename) - 1);
+    }
+    
+    /* Validate required field */
+    if (metadata->opus_data_size == 0) {
+        cJSON_Delete(root);
+        LOG_ERR("Missing required field: opus_data_size");
+        return MQTT_PARSER_ERR_MISSING_FIELD;
+    }
+    
+    cJSON_Delete(root);
+    return MQTT_PARSER_SUCCESS;
+}
+
+#if 0  /* OLD manual parsing code - removed */
+int mqtt_parse_json_metadata_OLD(const char *json_str, 
+                            mqtt_message_metadata_t *metadata)
+{
+    int ret;
     
     if (ret < 0) {
-        LOG_ERR("JSON parsing failed: %d", ret);
+        /* Zephyr's JSON parser rejects boolean 'false' values - use manual parser */
         
         /* Try manual parsing for required fields at minimum */
         char *size_str = strstr(json_str, "\"opusDataSize\"");
@@ -296,11 +337,7 @@ int mqtt_parse_json_metadata(const char *json_str,
             return MQTT_PARSER_ERR_MISSING_FIELD;
         }
         
-        /* Even if full parsing failed, we can proceed with manual parsing */
-        LOG_WRN("Using manual parsing - size=%u, vol=%u, pri=%u, count=%u, save=%d, interrupt=%d, file='%s'", 
-                metadata->opus_data_size, metadata->volume, metadata->priority,
-                metadata->play_count, metadata->save_to_file, metadata->interrupt_current,
-                metadata->filename);
+        /* Manual parsing succeeded */
         return MQTT_PARSER_SUCCESS;
     }
     
@@ -322,6 +359,7 @@ int mqtt_parse_json_metadata(const char *json_str,
     
     return MQTT_PARSER_SUCCESS;
 }
+#endif  /* End old manual parsing code */
 
 bool mqtt_validate_json_header(const char *json_str, size_t json_len)
 {

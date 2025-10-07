@@ -69,6 +69,61 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
   const router = Router();
 
   /**
+   * Send test ping to device
+   * POST /api/audio/ping
+   */
+  router.post('/audio/ping', async (req: Request, res: Response) => {
+    try {
+      const { deviceId } = req.body;
+      
+      if (!deviceId) {
+        return res.status(400).json({
+          success: false,
+          error: 'deviceId required',
+        });
+      }
+
+      const device = mqttClient.getDevice(deviceId);
+      if (!device) {
+        return res.status(404).json({
+          success: false,
+          error: 'Device not found',
+        });
+      }
+
+      // Use hardware ID for topic if available
+      const hwId = device.metadata?.hwId;
+      const audioDeviceId = hwId || deviceId;
+      const topic = `rapidreach/audio/${audioDeviceId}`;
+      
+      // Send tiny test message: [4-byte len][JSON]
+      const testJson = JSON.stringify({ test: 'ping', timestamp: Date.now() });
+      const lengthHeader = testJson.length.toString(16).padStart(4, '0');
+      const payload = Buffer.concat([
+        Buffer.from(lengthHeader, 'ascii'),
+        Buffer.from(testJson, 'utf-8')
+      ]);
+      
+      await mqttClient.publish(topic, payload);
+      
+      return res.json({
+        success: true,
+        message: 'Test ping sent',
+        details: {
+          deviceId,
+          topic,
+          payloadSize: payload.length,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send ping',
+      });
+    }
+  });
+
+  /**
    * Upload and send audio alert to device
    * POST /api/audio/alert
    */
@@ -190,8 +245,12 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       const jsonHeader = JSON.stringify(metadata);
       const jsonBuffer = Buffer.from(jsonHeader, 'utf-8');
       
-      // Combine JSON header and Opus data
-      const mqttPayload = Buffer.concat([jsonBuffer, opusData]);
+      // Prepend 4-byte hex length header for reliable parsing
+      const lengthHeader = jsonBuffer.length.toString(16).padStart(4, '0');
+      const lengthBuffer = Buffer.from(lengthHeader, 'ascii');
+      
+      // Combine: [4-byte length][JSON header][Opus data]
+      const mqttPayload = Buffer.concat([lengthBuffer, jsonBuffer, opusData]);
 
       // Use hardware ID for audio topic if available, fallback to deviceId
       const hwId = device.metadata?.hwId;
@@ -357,10 +416,14 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       };
 
       const jsonHeader = JSON.stringify(metadata);
-      const mqttPayload = Buffer.concat([
-        Buffer.from(jsonHeader, 'utf-8'),
-        opusData,
-      ]);
+      const jsonBuffer = Buffer.from(jsonHeader, 'utf-8');
+      
+      // Prepend 4-byte hex length header for reliable parsing
+      const lengthHeader = jsonBuffer.length.toString(16).padStart(4, '0');
+      const lengthBuffer = Buffer.from(lengthHeader, 'ascii');
+      
+      // Combine: [4-byte length][JSON header][Opus data]
+      const mqttPayload = Buffer.concat([lengthBuffer, jsonBuffer, opusData]);
 
       // Use hardware ID for audio topic if available, fallback to deviceId
       const hwId = device.metadata?.hwId;

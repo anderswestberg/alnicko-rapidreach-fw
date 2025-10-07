@@ -2,107 +2,49 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Reset Target and Prepare Debug",
+            "label": "Zephyr: Build (alnicko_speaker)",
             "type": "shell",
-            "command": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin/STM32_Programmer_CLI",
+            "command": "bash",
             "args": [
-                "-c", "port=SWD", "sn=004B001F3234510936303532", "mode=HOTPLUG",
-                "-hardRst"
+                "-lc",
+                "source ${workspaceFolder}/setup-zephyr-env.sh && west build -b alnicko_speaker -d build"
             ],
-            "group": "build"
-        },
-        {
-            "label": "Start ST-LINK GDB Server (50000)",
-            "type": "shell",
-            "command": "/bin/bash",
-            "args": [
-                "pkill -f ST-LINK_gdbserver 2>/dev/null || true; /opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver -p 50000 -f /tmp/stlink_gdbserver.log -l 3 -cp /opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin --swd --frequency 50 -i 004B001F3234510936303532 -m 1 --halt"
-            ],
-            "problemMatcher": [],
-            "isBackground": true,
-            "group": {
-                "kind": "build",
-                "isDefault": false
+            "options": {
+                "cwd": "${workspaceFolder}"
             },
-        },
-        {
-            "label": "Program Firmware",
-            "type": "shell",
-            "command": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin/STM32_Programmer_CLI",
-            "args": [
-                "-c", "port=SWD", "sn=004B001F3234510936303532", "mode=HOTPLUG",
-                "-hardRst",
-                "-w", "build/zephyr/zephyr.hex",
-                "-v",
-                "-rst"
+            "problemMatcher": [
+                "$gcc"
             ],
-            "group": "build",
-            "dependsOn": "Reset Target and Prepare Debug"
-        },
-        {
-            "label": "Start ST-LINK GDB Server",
-            "type": "shell",
-            "command": "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_2.2.200.202505060755/tools/bin/ST-LINK_gdbserver",
-            "args": [
-                "-p", "61234",
-                "-l", "1",
-                "-d",
-                "-s",
-                "-cp", "/opt/st/stm32cubeide_1.19.0/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.200.202503041107/tools/bin",
-                "-m", "0",
-                "--swd",
-                "-i", "004B001F3234510936303532",
-                "-g"
-            ],
-            "problemMatcher": [],
-            "isBackground": true,  
             "group": {
                 "kind": "build",
                 "isDefault": true
-            },
-            "dependsOn": "Reset Target and Prepare Debug"
-        },
-        {
-            "label": "Generate Firmware Updates",
-            "type": "shell",
-            "command": "python3 ${workspaceFolder}/script/generate_updates.py",
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": false
             }
         },
         {
-            "label": "Fetch Wi-Fi nRF70 blobs",
+            "label": "Zephyr: Flash (STM32CubeProgrammer)",
             "type": "shell",
-            "command": "west blobs fetch hal_nordic",
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": false
-            }
-        },
-        {
-            "label": "Device Server: Start (debug)",
-            "type": "shell",
-            "command": "npm",
+            "dependsOn": "Zephyr: Build (alnicko_speaker)",
+            "command": "bash",
             "args": [
-                "run",
-                "dev"
+                "-lc",
+                "source ${workspaceFolder}/setup-zephyr-env.sh && west flash -d build --runner stm32cubeprogrammer"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/device-server",
-                "env": {
-                    "NODE_OPTIONS": "--inspect=0.0.0.0:9229"
-                }
+                "cwd": "${workspaceFolder}"
             },
-            "isBackground": true,
+            "problemMatcher": []
+        },
+        {
+            "label": "Zephyr: Clean Build Artifacts",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "rm -rf build"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
             "problemMatcher": []
         }
     ]
