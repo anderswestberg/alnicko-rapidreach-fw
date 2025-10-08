@@ -61,7 +61,14 @@ int file_manager_init(void)
 static int ensure_fs_mounted(void)
 {
     if (!fs_mounted) {
-        return file_manager_init();
+        /* Try to mount, but if already mounted, just set flag */
+        int ret = file_manager_init();
+        if (ret == -EBUSY) {
+            /* Already mounted, just set flag */
+            fs_mounted = true;
+            return 0;
+        }
+        return ret;
     }
     return 0;
 }

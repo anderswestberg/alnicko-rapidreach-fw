@@ -8,6 +8,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/mqtt.h>
+#include <zephyr/fs/fs.h>
 #include <string.h>
 #include <stdio.h>
 #include "mqtt_client_wrapper.h"
@@ -66,6 +67,8 @@ static void mqtt_audio_alert_handler_v2(const char *topic,
         return;
     }
     
+    printk("HANDLER: payload_len=%zu\n", payload_len);
+    
     /* Check if this is a test ping (no opusDataSize field) */
     if (payload_len < 100) {
         LOG_INF("Test ping OK");
@@ -84,18 +87,59 @@ static void mqtt_audio_alert_handler_v2(const char *topic,
              (uint16_t)(k_uptime_get_32() & 0xFFFF), k_cycle_get_32() & 0xFFF);
     
     /* Check if we have audio data in the message */
+    printk("OPUS: size=%u ptr=%p len=%zu\n", 
+           parsed_msg.metadata.opus_data_size,
+           parsed_msg.opus_data,
+           parsed_msg.opus_data_len);
+    
+    /* Dump first 16 bytes to verify OGG header */
+    if (parsed_msg.opus_data && parsed_msg.opus_data_len >= 16) {
+        printk("OPUS_HDR: ");
+        for (int i = 0; i < 16; i++) {
+            printk("%02x", parsed_msg.opus_data[i]);
+        }
+        printk("\n");
+    }
+    
     if (parsed_msg.metadata.opus_data_size > 0) {
         if (parsed_msg.opus_data && parsed_msg.opus_data_len > 0) {
             /* Save audio data to file */
+            printk("WRITE: %s (%zu bytes)\n", temp_filename, parsed_msg.opus_data_len);
             ret = file_manager_write(temp_filename, parsed_msg.opus_data, 
                                    parsed_msg.opus_data_len);
+            printk("WRITE: ret=%d\n", ret);
             if (ret < 0) {
                 return;
+            }
+            
+            /* Verify file was written */
+            int exists = file_manager_exists(temp_filename);
+            printk("FILE_EXISTS: %d\n", exists);
+            
+            /* Also copy to /lfs/audio/mqtt_test.opus for CLI testing */
+            if (exists > 0) {
+                struct fs_file_t src, dst;
+                uint8_t buf[512];
+                fs_file_t_init(&src);
+                fs_file_t_init(&dst);
+                
+                if (fs_open(&src, temp_filename, FS_O_READ) == 0) {
+                    if (fs_open(&dst, "/lfs/audio/mqtt_test.opus", FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC) == 0) {
+                        ssize_t bytes;
+                        while ((bytes = fs_read(&src, buf, sizeof(buf))) > 0) {
+                            fs_write(&dst, buf, bytes);
+                        }
+                        fs_close(&dst);
+                        printk("COPIED to /lfs/audio/mqtt_test.opus\n");
+                    }
+                    fs_close(&src);
+                }
             }
         }
     }
     
     /* Queue for playback */
+    printk("Q1\n");
     struct audio_queue_item item = {
         .volume = parsed_msg.metadata.volume,
         .priority = parsed_msg.metadata.priority,
@@ -103,13 +147,22 @@ static void mqtt_audio_alert_handler_v2(const char *topic,
         .interrupt_current = parsed_msg.metadata.interrupt_current
     };
     
+    printk("Q2\n");
+    
     /* Use the temp file we just created */
     strncpy(item.filename, temp_filename, sizeof(item.filename) - 1);
     
+    printk("Q3\n");
+    
     ret = audio_queue_add(&item);
+    
+    printk("Q4\n");
+    
     if (ret != 0) {
         file_manager_delete(temp_filename);
     }
+    
+    printk("Q5\n");
 }
 
 /* Header declaration for mqtt_audio_handler_v2.h functionality */

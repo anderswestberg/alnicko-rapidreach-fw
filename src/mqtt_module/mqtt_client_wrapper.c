@@ -269,7 +269,10 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                 LOG_DBG("MQTT wrapper processing input...");
                 ret = mqtt_input(&w->client);
                 if (ret < 0 && ret != -EAGAIN) {
-                    LOG_ERR("mqtt_input error: %d", ret);
+                    /* Suppress repeated errors during reconnect */
+                    if (ret != -EBUSY) {
+                        LOG_ERR("mqtt_input error: %d", ret);
+                    }
                     k_mutex_lock(&w->state_mutex, K_FOREVER);
                     w->connected = false;
                     k_mutex_unlock(&w->state_mutex);
@@ -428,8 +431,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             }
             
             if (handler && pub->message.payload.len > 0) {
-                /* For small messages (< 8KB), use in-memory buffer for simplicity */
-                if (pub->message.payload.len <= 8192) {
+                /* For messages up to 32KB, use in-memory buffer */
+                if (pub->message.payload.len <= 32768) {
                     /* Allocate work item */
                     struct mqtt_msg_work *work = k_malloc(sizeof(*work));
                     if (work) {
@@ -440,9 +443,23 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                         /* Allocate and read payload */
                         work->payload = k_malloc(pub->message.payload.len);
                         if (work->payload) {
-                            int ret = mqtt_read_publish_payload_blocking(
-                                client, work->payload, pub->message.payload.len);
-                            if (ret >= 0) {
+                            /* Read complete payload - loop until all bytes received */
+                            size_t total_read = 0;
+                            while (total_read < pub->message.payload.len) {
+                                int ret = mqtt_read_publish_payload_blocking(
+                                    client, 
+                                    work->payload + total_read, 
+                                    pub->message.payload.len - total_read);
+                                if (ret < 0) {
+                                    LOG_ERR("Payload read error: %d", ret);
+                                    k_free(work->payload);
+                                    k_free(work);
+                                    goto cleanup_pub;
+                                }
+                                total_read += ret;
+                            }
+                            
+                            if (total_read == pub->message.payload.len) {
                                 work->payload_len = pub->message.payload.len;
                                 k_work_init(&work->work, process_message_work);
                                 int submit_ret = k_work_submit_to_queue(&w->msg_work_queue, &work->work);
@@ -451,11 +468,10 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                     k_free(work->payload);
                                     k_free(work);
                                 }
-                            } else {
-                                LOG_ERR("Failed to read payload: %d", ret);
-                                k_free(work->payload);
-                                k_free(work);
                             }
+                            
+                        cleanup_pub:
+                            (void)0; /* Label target */
                         } else {
                             LOG_ERR("Failed to allocate %zu bytes for payload", pub->message.payload.len);
                             k_free(work);

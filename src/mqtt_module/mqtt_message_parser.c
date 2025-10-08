@@ -96,6 +96,9 @@ int mqtt_parse_message(const uint8_t *payload, size_t payload_len,
     size_t opus_offset = 4 + json_len;
     size_t remaining_len = payload_len - opus_offset;
     
+    printk("PARSE: offset=%zu remaining=%zu expected=%u\n", 
+           opus_offset, remaining_len, parsed_msg->metadata.opus_data_size);
+    
     if (remaining_len < parsed_msg->metadata.opus_data_size) {
         /* This might be a file-based audio message where opus data is stored separately */
         if (remaining_len == 0 && parsed_msg->metadata.opus_data_size > 0) {

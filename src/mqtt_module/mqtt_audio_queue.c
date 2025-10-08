@@ -139,19 +139,17 @@ static void audio_playback_thread(void *p1, void *p2, void *p3)
             /* Set volume with codec-specific mapping */
 #ifdef CONFIG_AUDIO_TAS6422DAC
             /* Map 0-100% to TAS6422DAC range (-200 to +48 in 0.5 dB steps) */
+            /* Adjusted for audible range: 0% = -100dB, 50% = -50dB, 100% = 0dB */
             int codec_volume;
             if (item.volume == 0) {
                 codec_volume = -200;  /* Mute */
-            } else if (item.volume <= 80) {
-                /* 0-80% maps to -200 to 0 (mute to 0 dB) */
-                codec_volume = -200 + (item.volume * 200 / 80);
             } else {
-                /* 80-100% maps to 0 to +48 (0 dB to +24 dB) */
-                codec_volume = (item.volume - 80) * 48 / 20;
-            }
-            /* Apply hardcoded maximum limit */
-            if (codec_volume > (75 * 48 / 20 - 16)) { /* 75% max volume */
-                codec_volume = (75 * 48 / 20 - 16);
+                /* Linear mapping: 1-100% maps to -100 to 0 dB */
+                codec_volume = -100 + (item.volume * 100 / 100);
+                /* Clamp to safe maximum */
+                if (codec_volume > -16) {
+                    codec_volume = -16;  /* Max -8dB for safety */
+                }
             }
             LOG_INF("Audio volume request: %d%%, mapped codec value: %d", 
                     item.volume, codec_volume);
