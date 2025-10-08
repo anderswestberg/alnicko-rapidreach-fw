@@ -67,10 +67,11 @@ async function startServer() {
   // Error handling
   app.use(errorHandler);
 
-  // Start server
-  const server = app.listen(config.server.port, () => {
+  // Start server on all interfaces
+  const server = app.listen(config.server.port, '0.0.0.0', () => {
     logger.info(`Device server running on port ${config.server.port}`);
     logger.info(`Environment: ${config.server.nodeEnv}`);
+    logger.info(`Accessible on all network interfaces (0.0.0.0)`);
   });
 
   // Graceful shutdown

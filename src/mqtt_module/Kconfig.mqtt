@@ -76,7 +76,7 @@ config RPR_MQTT_FALLBACK_BROKER_ENABLED
 
 config RPR_MQTT_FALLBACK_BROKER_HOST
     string "Fallback MQTT broker hostname or IP"
-    default "37.123.169.250"
+    default "192.168.2.79"
     depends on RPR_MQTT_FALLBACK_BROKER_ENABLED
     help
       The hostname or IP address of the fallback MQTT broker (e.g., public cloud broker).

@@ -45,6 +45,52 @@ export function createDeviceRoutes(mqttClient: DeviceMqttClient): Router {
     }
   });
 
+  // Send shell command to device
+  router.post('/devices/:deviceId/shell', async (req: Request, res: Response) => {
+    try {
+      const { deviceId } = req.params;
+      const validation = executeCommandSchema.safeParse(req.body);
+      
+      if (!validation.success) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid request',
+          details: validation.error.errors,
+        });
+      }
+
+      const { command } = validation.data;
+      
+      const device = mqttClient.getDevice(deviceId);
+      if (!device) {
+        return res.status(404).json({
+          success: false,
+          error: 'Device not found',
+        });
+      }
+
+      // Publish command to device shell topic
+      const shellTopic = `devices/${deviceId.replace('-speaker', '')}-shell/rx`;
+      await mqttClient.publish(shellTopic, command);
+      
+      logger.info(`Shell command sent to ${deviceId}`, { command });
+      
+      return res.json({
+        success: true,
+        message: 'Command sent to device',
+        deviceId,
+        command,
+      });
+      
+    } catch (error) {
+      logger.error('Error sending shell command:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+      });
+    }
+  });
+
   // Get all devices
   router.get('/devices', (_req: Request, res: Response) => {
     try {

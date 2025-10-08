@@ -1,7 +1,19 @@
 import type { DataProvider } from 'react-admin';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+// Auto-detect API URL based on current hostname
+const getApiUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  
+  // Use same hostname as web app, but port 3002
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+  return `${protocol}//${hostname}:3002/api`;
+};
+
+const API_URL = getApiUrl();
 const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key';
 
 const apiClient = axios.create({

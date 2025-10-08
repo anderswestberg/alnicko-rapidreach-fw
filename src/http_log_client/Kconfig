@@ -47,7 +47,7 @@ config HTTP_LOG_CLIENT_THREAD_PRIORITY
 
 config HTTP_LOG_CLIENT_DEFAULT_SERVER_URL
 	string "Default log server URL"
-	default "http://192.168.2.79:3000"
+	default "http://37.123.169.250"
 	help
 	  Default URL of the log server. Can be overridden at runtime.
 

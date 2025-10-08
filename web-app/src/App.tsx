@@ -7,9 +7,11 @@ import { DeviceShow } from './devices/DeviceShow';
 import DevicesIcon from '@mui/icons-material/Devices';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import TerminalIcon from '@mui/icons-material/Terminal';
 import { createTheme } from '@mui/material/styles';
 import { LogsList } from './logs/LogsList';
 import { AudioAlerts } from './audio/AudioAlerts';
+import { DeviceTerminal } from './terminal/DeviceTerminal';
 // Navigation components temporarily removed due to compatibility issues
 // import { MultiLevelMenu, MenuItemCategory } from '@react-admin/ra-navigation';
 
@@ -81,6 +83,12 @@ function App() {
         list={AudioAlerts}
         icon={VolumeUpIcon}
         options={{ label: 'Audio Alerts' }}
+      />
+      <Resource 
+        name="terminal" 
+        list={DeviceTerminal}
+        icon={TerminalIcon}
+        options={{ label: 'Terminal' }}
       />
     </Admin>
   );

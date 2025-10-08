@@ -66,7 +66,8 @@ static const uint32_t allowed_events[STATE_MAX] = {
     
     [STATE_OPERATIONAL] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_MQTT_DISCONNECTED),
     
-    [STATE_ERROR] = BIT(EVENT_RETRY) | BIT(EVENT_NETWORK_UP) | BIT(EVENT_NETWORK_DOWN)
+    [STATE_ERROR] = BIT(EVENT_RETRY) | BIT(EVENT_NETWORK_UP) | BIT(EVENT_NETWORK_DOWN) | 
+                    BIT(EVENT_MQTT_CONNECTED) | BIT(EVENT_MQTT_DISCONNECTED)
 };
 
 /**
@@ -314,6 +315,22 @@ static void state_init_entry(init_sm_context_t *ctx, init_event_t event)
 static void state_wait_network_entry(init_sm_context_t *ctx, init_event_t event)
 {
     LOG_INF("Entering WAIT_NETWORK state");
+    
+#ifdef CONFIG_RPR_MODEM_AUTO_CONNECT
+    /* Try to connect modem first if Ethernet is disabled */
+    #ifndef CONFIG_RPR_ETHERNET
+    LOG_INF("Ethernet disabled - initializing LTE modem...");
+    extern int modem_init_and_connect(void);
+    int modem_ret = modem_init_and_connect();
+    if (modem_ret == 0) {
+        LOG_INF("LTE modem connected successfully");
+        /* Give modem time to establish IP */
+        k_sleep(K_SECONDS(5));
+    } else {
+        LOG_ERR("LTE modem connection failed: %d", modem_ret);
+    }
+    #endif
+#endif
     
     /* Check if network is already up */
     struct net_if *iface = net_if_get_default();
@@ -749,6 +766,11 @@ static void state_operational_handler(init_sm_context_t *ctx, init_event_t event
 static void state_error_handler(init_sm_context_t *ctx, init_event_t event)
 {
     switch (event) {
+    case EVENT_MQTT_CONNECTED:
+        LOG_INF("MQTT connected while in error state - recovering");
+        ctx->mqtt_connected = true;
+        state_transition(ctx, STATE_OPERATIONAL);
+        break;
     case EVENT_RETRY:
         LOG_INF("Retrying from error state");
         

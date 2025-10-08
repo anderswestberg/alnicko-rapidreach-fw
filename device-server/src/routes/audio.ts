@@ -69,6 +69,103 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
   const router = Router();
 
   /**
+   * List saved audio files
+   * GET /api/audio/library
+   */
+  router.get('/audio/library', async (_req: Request, res: Response) => {
+    try {
+      await fs.mkdir('/tmp/audio-library', { recursive: true });
+      const files = await fs.readdir('/tmp/audio-library');
+      
+      const fileDetails = await Promise.all(
+        files.map(async (filename) => {
+          const stats = await fs.stat(`/tmp/audio-library/${filename}`);
+          return {
+            filename,
+            size: stats.size,
+            modified: stats.mtime,
+          };
+        })
+      );
+      
+      return res.json({
+        success: true,
+        files: fileDetails,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to list audio library',
+      });
+    }
+  });
+
+  /**
+   * Re-send audio from library
+   * POST /api/audio/library/send
+   */
+  router.post('/audio/library/send', async (req: Request, res: Response) => {
+    try {
+      const { deviceId, filename, volume, priority, playCount, interruptCurrent } = req.body;
+      
+      if (!deviceId || !filename) {
+        return res.status(400).json({
+          success: false,
+          error: 'deviceId and filename required',
+        });
+      }
+
+      const device = mqttClient.getDevice(deviceId);
+      if (!device) {
+        return res.status(404).json({
+          success: false,
+          error: 'Device not found',
+        });
+      }
+
+      // Read from library
+      const libraryPath = `/tmp/audio-library/${filename}`;
+      const opusData = await fs.readFile(libraryPath);
+      
+      // Prepare MQTT message
+      const metadata = {
+        opusDataSize: opusData.length,
+        priority: priority || 5,
+        saveToFile: false,
+        filename: filename,
+        playCount: playCount || 1,
+        volume: volume || 25,
+        interruptCurrent: interruptCurrent || false,
+      };
+
+      const jsonHeader = JSON.stringify(metadata);
+      const jsonBuffer = Buffer.from(jsonHeader, 'utf-8');
+      const lengthHeader = jsonBuffer.length.toString(16).padStart(4, '0');
+      const lengthBuffer = Buffer.from(lengthHeader, 'ascii');
+      const mqttPayload = Buffer.concat([lengthBuffer, jsonBuffer, opusData]);
+
+      const hwId = device.metadata?.hwId;
+      const audioDeviceId = hwId || deviceId;
+      const topic = `rapidreach/audio/${audioDeviceId}`;
+      
+      await mqttClient.publish(topic, mqttPayload);
+      
+      return res.json({
+        success: true,
+        message: 'Audio sent from library',
+        filename,
+        deviceId,
+      });
+      
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send from library',
+      });
+    }
+  });
+
+  /**
    * Send test ping to device
    * POST /api/audio/ping
    */
@@ -230,6 +327,12 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       // Read the encoded Opus file
       const opusData = await fs.readFile(outputPath);
       logger.info(`Opus file created: ${opusData.length} bytes`);
+      
+      // Save to audio library for re-use
+      const libraryPath = `/tmp/audio-library/${req.file.originalname.replace(/\.[^.]+$/, '.opus')}`;
+      await fs.mkdir('/tmp/audio-library', { recursive: true });
+      await fs.copyFile(outputPath, libraryPath);
+      logger.debug(`Saved to audio library: ${libraryPath}`);
 
       // Prepare MQTT message with JSON header + Opus data
       const metadata = {

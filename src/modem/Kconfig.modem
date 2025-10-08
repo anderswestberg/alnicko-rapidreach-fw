@@ -33,5 +33,12 @@ config RPR_MODEM_TEST_SUPPORT
     help
       Enable debugging/testing shell commands for modem.
 
+config RPR_MODEM_AUTO_CONNECT
+    bool "Automatically connect modem at boot"
+    default n
+    help
+      If enabled, the modem will be powered on and connected automatically
+      during system initialization instead of requiring manual CLI commands.
+
 endif # RPR_MODEM
 

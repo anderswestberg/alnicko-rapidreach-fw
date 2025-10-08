@@ -40,15 +40,26 @@ const VisuallyHiddenInput = styled('input')({
   width: 1,
 });
 
+// Helper to get saved setting with fallback
+const getSavedSetting = (key: string, defaultValue: any): any => {
+  const saved = localStorage.getItem(key);
+  if (saved === null) return defaultValue;
+  if (typeof defaultValue === 'number') return parseInt(saved) || defaultValue;
+  if (typeof defaultValue === 'boolean') return saved === 'true';
+  return saved;
+};
+
 export const AudioAlerts = () => {
   const [selectedDevice, setSelectedDevice] = useState('');
   const [devices, setDevices] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [priority, setPriority] = useState(5);
-  const [volume, setVolume] = useState(25);
-  const [playCount, setPlayCount] = useState(1);
-  const [interruptCurrent, setInterruptCurrent] = useState(false);
-  const [saveToFile, setSaveToFile] = useState(false);
+  const [lastFileName, setLastFileName] = useState<string>(getSavedSetting('lastAudioFileName', ''));
+  const [libraryFiles, setLibraryFiles] = useState<any[]>([]);
+  const [priority, setPriority] = useState(getSavedSetting('audioAlertPriority', 5));
+  const [volume, setVolume] = useState(getSavedSetting('audioAlertVolume', 25));
+  const [playCount, setPlayCount] = useState(getSavedSetting('audioAlertPlayCount', 1));
+  const [interruptCurrent, setInterruptCurrent] = useState(getSavedSetting('audioAlertInterrupt', false));
+  const [saveToFile, setSaveToFile] = useState(getSavedSetting('audioAlertSaveToFile', false));
   const [filename, setFilename] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -57,7 +68,22 @@ export const AudioAlerts = () => {
   const notify = useNotify();
   // const refresh = useRefresh(); // Unused, commented out
 
-  // Load devices on mount
+  // Load audio library on mount
+  const loadAudioLibrary = React.useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/audio/library`, {
+        headers: { 'X-API-Key': API_KEY },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLibraryFiles(data.files || []);
+      }
+    } catch (error) {
+      console.error('Failed to load audio library:', error);
+    }
+  }, []);
+
+  // Load devices on mount and check for pre-selected device
   React.useEffect(() => {
     dataProvider.getList('devices', {
       filter: {}, // Show all devices, not just online ones
@@ -65,10 +91,20 @@ export const AudioAlerts = () => {
       sort: { field: 'id', order: 'ASC' },
     }).then(({ data }) => {
       setDevices(data); // Show all devices, let user decide which to send to
+      
+      // Check if a device was pre-selected from DeviceList
+      const preselected = sessionStorage.getItem('preselectedDevice');
+      if (preselected) {
+        setSelectedDevice(preselected);
+        sessionStorage.removeItem('preselectedDevice');
+      }
     }).catch(() => {
       notify('Failed to load devices', { type: 'error' });
     });
-  }, [dataProvider, notify]);
+    
+    // Load audio library
+    loadAudioLibrary();
+  }, [dataProvider, notify, loadAudioLibrary]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -87,10 +123,77 @@ export const AudioAlerts = () => {
       }
       
       setSelectedFile(file);
+      setLastFileName(file.name);
+      localStorage.setItem('lastAudioFileName', file.name);
+      
       // Always update filename when saveToFile is enabled and selecting a new file
       if (saveToFile) {
         setFilename(file.name.replace(/\.[^/.]+$/, '.opus'));
       }
+    }
+  };
+
+  // Save settings to localStorage when they change
+  React.useEffect(() => {
+    localStorage.setItem('audioAlertVolume', volume.toString());
+  }, [volume]);
+
+  React.useEffect(() => {
+    localStorage.setItem('audioAlertPriority', priority.toString());
+  }, [priority]);
+
+  React.useEffect(() => {
+    localStorage.setItem('audioAlertPlayCount', playCount.toString());
+  }, [playCount]);
+
+  React.useEffect(() => {
+    localStorage.setItem('audioAlertInterrupt', interruptCurrent.toString());
+  }, [interruptCurrent]);
+
+  React.useEffect(() => {
+    localStorage.setItem('audioAlertSaveToFile', saveToFile.toString());
+  }, [saveToFile]);
+
+  const handleSendFromLibrary = async (libraryFilename?: string) => {
+    if (!selectedDevice) {
+      notify('Please select a device', { type: 'error' });
+      return;
+    }
+
+    const filenameToSend = libraryFilename || lastFileName;
+    if (!filenameToSend) {
+      notify('No file in library to send', { type: 'error' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/audio/library/send`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY,
+        },
+        body: JSON.stringify({
+          deviceId: selectedDevice,
+          filename: filenameToSend.replace(/\.[^.]+$/, '.opus'), // Ensure .opus extension
+          volume,
+          priority,
+          playCount,
+          interruptCurrent,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to send');
+      }
+
+      notify('Audio sent from library', { type: 'success' });
+    } catch (error: any) {
+      notify(error.message || 'Failed to send from library', { type: 'error' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -125,8 +228,13 @@ export const AudioAlerts = () => {
   };
 
   const handleSubmit = async () => {
-    if (!selectedDevice || !selectedFile) {
-      notify('Please select a device and audio file', { type: 'error' });
+    if (!selectedDevice) {
+      notify('Please select a device', { type: 'error' });
+      return;
+    }
+    
+    if (!selectedFile) {
+      notify('Please select an audio file first', { type: 'error' });
       return;
     }
 
@@ -197,6 +305,9 @@ export const AudioAlerts = () => {
         sizeBytes: selectedFile.size,
       });
       
+      // Reload library to include newly uploaded file
+      loadAudioLibrary();
+      
       // Don't reset the selected file - keep it for potential re-use
       setUploadProgress(100);
       
@@ -250,7 +361,7 @@ export const AudioAlerts = () => {
                   startIcon={<CloudUploadIcon />}
                   disabled={loading}
                 >
-                  Select Audio File
+                  {selectedFile ? 'Change Audio File' : (lastFileName ? `Select Audio File (last: ${lastFileName})` : 'Select Audio File')}
                   <VisuallyHiddenInput 
                     id="audio-file-input"
                     type="file" 
@@ -364,16 +475,30 @@ export const AudioAlerts = () => {
                 />
               )}
 
-              {/* Test Ping Button */}
-              <Button
-                variant="outlined"
-                color="secondary"
-                onClick={handleTestPing}
-                disabled={loading || !selectedDevice}
-                startIcon={<PlayArrowIcon />}
-              >
-                Test Ping (No Audio)
-              </Button>
+              {/* Quick Actions */}
+              <Stack direction="row" spacing={2} flexWrap="wrap">
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  onClick={handleTestPing}
+                  disabled={loading || !selectedDevice}
+                  startIcon={<PlayArrowIcon />}
+                >
+                  Test Ping
+                </Button>
+                
+                {lastFileName && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => handleSendFromLibrary()}
+                    disabled={loading || !selectedDevice}
+                    startIcon={<VolumeUpIcon />}
+                  >
+                    Send Last: {lastFileName.substring(0, 20)}{lastFileName.length > 20 ? '...' : ''}
+                  </Button>
+                )}
+              </Stack>
 
               {/* Upload Progress */}
               {loading && (

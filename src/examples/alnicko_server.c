@@ -23,12 +23,12 @@
 #define HTTP_GET_RESPONSE_BUF_LEN 512
 #define SERVER_DELAY_MS           2000
 
-#define ALNICKO_SERVER_AUDIO_LIST   "http://192.168.2.79:9001/api/files/audio"
-#define ALNICKO_SERVER_FW_NAME      "http://192.168.2.79:9001/api/files/firmware"
-#define ALNICKO_SERVER_GET_TIME     "http://192.168.2.79:9001/api/datetime"
-#define ALNICKO_SERVER_POST_MESSAGE "http://192.168.2.79:9001/api/messages"
-#define ALNICKO_SERVER_GET_FW       "http://192.168.2.79:9001/download/firmware/"
-#define ALNICKO_SERVER_GET_AUDIO    "http://192.168.2.79:9001/download/audio/"
+#define ALNICKO_SERVER_AUDIO_LIST   "http://37.123.169.250/api/files/audio"
+#define ALNICKO_SERVER_FW_NAME      "http://37.123.169.250/api/files/firmware"
+#define ALNICKO_SERVER_GET_TIME     "http://37.123.169.250/api/datetime"
+#define ALNICKO_SERVER_POST_MESSAGE "http://37.123.169.250/api/messages"
+#define ALNICKO_SERVER_GET_FW       "http://37.123.169.250/download/firmware/"
+#define ALNICKO_SERVER_GET_AUDIO    "http://37.123.169.250/download/audio/"
 
 LOG_MODULE_REGISTER(alnicko_server, CONFIG_EXAMPLES_ALNICKO_SERVER_LOG_LEVEL);
 
