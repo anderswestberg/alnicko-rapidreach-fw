@@ -25,7 +25,15 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { styled } from '@mui/material/styles';
 import { postWebLog } from '../dataProvider';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+// Auto-detect API URL
+const getApiUrl = () => {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+  return `${protocol}//${hostname}:3002/api`;
+};
+
+const API_URL = getApiUrl();
 const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key';
 
 const VisuallyHiddenInput = styled('input')({

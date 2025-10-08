@@ -1,26 +1,40 @@
 import type { DataProvider } from 'react-admin';
 import axios from 'axios';
 
-// Auto-detect API URL based on current hostname
+// Auto-detect API URL - must be a getter to work at runtime
 const getApiUrl = () => {
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
+  const envUrl = import.meta.env.VITE_API_URL;
+  console.log('ENV VITE_API_URL:', envUrl);
+  console.log('window.location.hostname:', window.location.hostname);
+  console.log('window.location.protocol:', window.location.protocol);
+  
+  if (envUrl) {
+    console.log('Using env API URL:', envUrl);
+    return envUrl;
   }
   
   // Use same hostname as web app, but port 3002
   const protocol = window.location.protocol;
   const hostname = window.location.hostname;
-  return `${protocol}//${hostname}:3002/api`;
+  const url = `${protocol}//${hostname}:3002/api`;
+  console.log('Auto-detected API URL:', url);
+  return url;
 };
 
-const API_URL = getApiUrl();
 const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key';
 
+// Create axios instance without baseURL - we'll add it per request
 const apiClient = axios.create({
-  baseURL: API_URL,
   headers: {
     'X-API-Key': API_KEY,
   },
+});
+
+// Add request interceptor to always set baseURL dynamically
+apiClient.interceptors.request.use((config) => {
+  config.baseURL = getApiUrl();
+  console.log('API Request:', config.method?.toUpperCase(), config.url, 'Headers:', config.headers);
+  return config;
 });
 
 // Simple client-side logger that posts logs to the device-server
