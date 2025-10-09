@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rapidreach-ingress
+  namespace: rapidreach
+  annotations:
+    # Use nginx ingress controller
+    kubernetes.io/ingress.class: nginx
+    # Enable SSL redirect
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Use Let's Encrypt production issuer
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Proxy settings for large payloads (audio files)
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  tls:
+  - hosts:
+    - speaker-alert.ddns.net
+    secretName: rapidreach-tls-cert
+  rules:
+  - host: speaker-alert.ddns.net
+    http:
+      paths:
+      # Web app (root path)
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-app
+            port:
+              number: 80
+      # Device server API
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: device-server
+            port:
+              number: 3002
+

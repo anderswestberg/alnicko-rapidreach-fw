@@ -1,31 +1,8 @@
 import type { DataProvider } from 'react-admin';
 import axios from 'axios';
+import { getApiUrl, getApiKey } from './lib/api-config';
 
-// Auto-detect API URL - must be a getter to work at runtime
-const getApiUrl = () => {
-  const envUrl = import.meta.env.VITE_API_URL;
-  console.log('ENV VITE_API_URL:', envUrl);
-  console.log('window.location.hostname:', window.location.hostname);
-  console.log('window.location.protocol:', window.location.protocol);
-  
-  if (envUrl) {
-    console.log('Using env API URL:', envUrl);
-    return envUrl;
-  }
-  
-  // Auto-detect based on current location
-  const protocol = window.location.protocol;
-  const hostname = window.location.hostname;
-  
-  // If accessing via k3s NodePort (30080), use device-server NodePort (30002)
-  const port = window.location.port === '30080' ? '30002' : '3002';
-  
-  const url = `${protocol}//${hostname}:${port}/api`;
-  console.log('Auto-detected API URL:', url);
-  return url;
-};
-
-const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key';
+const API_KEY = getApiKey();
 
 // Create axios instance without baseURL - we'll add it per request
 const apiClient = axios.create({

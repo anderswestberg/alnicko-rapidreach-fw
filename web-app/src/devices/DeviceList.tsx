@@ -51,20 +51,27 @@ const ActionsField = () => {
   
   if (!record) return null;
   
-  const deviceId = record.clientId || record.id;
+  // Use deviceId (numeric like "313938") for pre-selection
+  const deviceId = record.deviceId || record.id;
   
   const handleTerminalClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Pre-select device and navigate using hash router
+    // Pre-select device BEFORE navigation
     sessionStorage.setItem('preselectedDevice', deviceId);
-    window.location.hash = '#/terminal';
+    // Small delay to ensure sessionStorage is written
+    setTimeout(() => {
+      window.location.hash = '#/terminal';
+    }, 0);
   };
   
   const handleAudioClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Navigate and pre-select device using hash router
+    // Pre-select device BEFORE navigation
     sessionStorage.setItem('preselectedDevice', deviceId);
-    window.location.hash = '#/audio';
+    // Small delay to ensure sessionStorage is written
+    setTimeout(() => {
+      window.location.hash = '#/audio';
+    }, 0);
   };
 
   const handleLogsClick = (e: React.MouseEvent) => {

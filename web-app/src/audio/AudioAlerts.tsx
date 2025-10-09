@@ -24,18 +24,10 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { styled } from '@mui/material/styles';
 import { postWebLog } from '../dataProvider';
-
-// Auto-detect API URL
-const getApiUrl = () => {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  const protocol = window.location.protocol;
-  const hostname = window.location.hostname;
-  const port = window.location.port === '30080' ? '30002' : '3002';
-  return `${protocol}//${hostname}:${port}/api`;
-};
+import { getApiUrl, getApiKey } from '../lib/api-config';
 
 const API_URL = getApiUrl();
-const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key';
+const API_KEY = getApiKey();
 
 const VisuallyHiddenInput = styled('input')({
   clip: 'rect(0 0 0 0)',
