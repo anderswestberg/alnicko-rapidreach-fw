@@ -15,7 +15,7 @@ import { Chip, IconButton, Tooltip, Stack, useMediaQuery } from '@mui/material';
 import type { Theme } from '@mui/material/styles';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
-import { useNavigate } from 'react-router-dom';
+import ListAltIcon from '@mui/icons-material/ListAlt';
 
 const DeviceFilter = (props: any) => (
   <Filter {...props}>
@@ -48,7 +48,6 @@ const StatusField = ({ record }: any) => {
 
 const ActionsField = () => {
   const record = useRecordContext();
-  const navigate = useNavigate();
   
   if (!record) return null;
   
@@ -56,28 +55,42 @@ const ActionsField = () => {
   
   const handleTerminalClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Pre-select device and navigate
+    // Pre-select device and navigate using hash router
     sessionStorage.setItem('preselectedDevice', deviceId);
-    navigate('/terminal');
+    window.location.hash = '#/terminal';
   };
   
   const handleAudioClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Navigate and pre-select device
-    navigate('/audio');
-    // Store selected device in sessionStorage for AudioAlerts to pick up
+    // Navigate and pre-select device using hash router
     sessionStorage.setItem('preselectedDevice', deviceId);
+    window.location.hash = '#/audio';
+  };
+
+  const handleLogsClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Navigate to logs with device filter using hash router
+    window.location.hash = `#/logs?filter=${encodeURIComponent(JSON.stringify({ deviceId }))}`;
   };
   
   return (
     <Stack direction="row" spacing={1}>
+      <Tooltip title="View Logs">
+        <IconButton
+          size="small"
+          onClick={handleLogsClick}
+          color="default"
+        >
+          <ListAltIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
       <Tooltip title="Open Terminal">
         <IconButton
           size="small"
           onClick={handleTerminalClick}
           color="primary"
         >
-          <TerminalIcon />
+          <TerminalIcon fontSize="small" />
         </IconButton>
       </Tooltip>
       <Tooltip title="Send Audio Alert">
@@ -86,7 +99,7 @@ const ActionsField = () => {
           onClick={handleAudioClick}
           color="secondary"
         >
-          <VolumeUpIcon />
+          <VolumeUpIcon fontSize="small" />
         </IconButton>
       </Tooltip>
     </Stack>
@@ -102,10 +115,10 @@ export const DeviceList = () => {
         <SimpleList
           primaryText={(record) => record.clientId || record.id}
           secondaryText={(record) => 
-            `${record.type} • ${record.status} • ${record.metadata?.firmwareVersion || 'unknown'}`
+            `${record.type} • ${record.status} • ${record.firmwareVersion || 'unknown'}`
           }
           tertiaryText={(record) => 
-            `IP: ${record.metadata?.ipAddress || 'N/A'} • Last seen: ${new Date(record.lastSeen).toLocaleString()}`
+            `IP: ${record.ipAddress || 'N/A'} • Last seen: ${new Date(record.lastSeen).toLocaleString()}`
           }
           linkType="show"
           rowStyle={(record) => ({
@@ -114,22 +127,23 @@ export const DeviceList = () => {
         />
       ) : (
         <Datagrid rowClick="show">
-          <TextField source="clientId" label="Device ID" />
+          <TextField source="deviceId" label="Device ID" />
+          <TextField source="clientId" label="Client ID" />
           <ChipField source="type" label="Type" />
           <FunctionField label="Status" render={StatusField} />
           <DateField source="lastSeen" label="Last Seen" showTime />
           <FunctionField
             label="IP Address"
-            render={(record: any) => record.metadata?.ipAddress || '-'}
+            render={(record: any) => record.ipAddress || '-'}
           />
           <FunctionField
             label="Firmware"
-            render={(record: any) => record.metadata?.firmwareVersion || '-'}
+            render={(record: any) => record.firmwareVersion || '-'}
           />
           <FunctionField
             label="Uptime"
             render={(record: any) => {
-              const uptime = record.metadata?.uptime;
+              const uptime = record.uptime;
               if (!uptime) return '-';
               
               const days = Math.floor(uptime / 86400);

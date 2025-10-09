@@ -159,7 +159,8 @@ export function createDeviceRoutes(mqttClient: DeviceMqttClient): Router {
       if (ObjectId.isValid(deviceId) && deviceId.length === 24) {
         device = await devicesCollection.findOne({ _id: new ObjectId(deviceId) });
       } else {
-        device = await devicesCollection.findOne({ $or: [{ clientId: deviceId }, { id: deviceId }] });
+        // Query by deviceId (numeric like "313938") or clientId (like "313938-speaker")
+        device = await devicesCollection.findOne({ $or: [{ deviceId }, { clientId: deviceId }, { id: deviceId }] });
       }
       
       if (!device || !device.clientId) {

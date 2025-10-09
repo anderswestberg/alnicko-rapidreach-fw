@@ -13,10 +13,14 @@ const getApiUrl = () => {
     return envUrl;
   }
   
-  // Use same hostname as web app, but port 3002
+  // Auto-detect based on current location
   const protocol = window.location.protocol;
   const hostname = window.location.hostname;
-  const url = `${protocol}//${hostname}:3002/api`;
+  
+  // If accessing via k3s NodePort (30080), use device-server NodePort (30002)
+  const port = window.location.port === '30080' ? '30002' : '3002';
+  
+  const url = `${protocol}//${hostname}:${port}/api`;
   console.log('Auto-detected API URL:', url);
   return url;
 };

@@ -30,7 +30,8 @@ const getApiUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
   const protocol = window.location.protocol;
   const hostname = window.location.hostname;
-  return `${protocol}//${hostname}:3002/api`;
+  const port = window.location.port === '30080' ? '30002' : '3002';
+  return `${protocol}//${hostname}:${port}/api`;
 };
 
 const API_URL = getApiUrl();
@@ -62,7 +63,7 @@ export const AudioAlerts = () => {
   const [devices, setDevices] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [lastFileName, setLastFileName] = useState<string>(getSavedSetting('lastAudioFileName', ''));
-  const [libraryFiles, setLibraryFiles] = useState<any[]>([]);
+  // const [libraryFiles, setLibraryFiles] = useState<any[]>([]); // Reserved for future library feature
   const [priority, setPriority] = useState(getSavedSetting('audioAlertPriority', 5));
   const [volume, setVolume] = useState(getSavedSetting('audioAlertVolume', 25));
   const [playCount, setPlayCount] = useState(getSavedSetting('audioAlertPlayCount', 1));
@@ -76,19 +77,20 @@ export const AudioAlerts = () => {
   const notify = useNotify();
   // const refresh = useRefresh(); // Unused, commented out
 
-  // Load audio library on mount
+  // Load audio library on mount (disabled for now)
   const loadAudioLibrary = React.useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/audio/library`, {
-        headers: { 'X-API-Key': API_KEY },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setLibraryFiles(data.files || []);
-      }
-    } catch (error) {
-      console.error('Failed to load audio library:', error);
-    }
+    // Reserved for future library feature
+    // try {
+    //   const response = await fetch(`${API_URL}/audio/library`, {
+    //     headers: { 'X-API-Key': API_KEY },
+    //   });
+    //   if (response.ok) {
+    //     const data = await response.json();
+    //     setLibraryFiles(data.files || []);
+    //   }
+    // } catch (error) {
+    //   console.error('Failed to load audio library:', error);
+    // }
   }, []);
 
   // Load devices on mount and check for pre-selected device
@@ -354,8 +356,8 @@ export const AudioAlerts = () => {
                   label="Select Device"
                 >
                   {devices.map((device) => (
-                    <MenuItem key={device.id} value={device.clientId || device.id}>
-                      {device.clientId || device.id} - {device.type} ({device.status || 'unknown'})
+                    <MenuItem key={device.id} value={device.deviceId}>
+                      {device.clientId || device.deviceId} - {device.type} ({device.status || 'unknown'})
                     </MenuItem>
                   ))}
                 </Select>

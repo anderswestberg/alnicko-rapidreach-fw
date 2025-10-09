@@ -482,7 +482,7 @@ export class DeviceMqttClient extends EventEmitter {
   private updateDeviceStatus(
     deviceId: string, 
     status: 'online' | 'offline',
-    metadata?: {
+    deviceInfo?: {
       clientId?: string;
       type?: 'speaker' | 'sensor' | 'unknown';
       firmwareVersion?: string;
@@ -496,14 +496,14 @@ export class DeviceMqttClient extends EventEmitter {
     if (!device) {
       device = {
         id: deviceId,
-        type: metadata?.type || 'speaker',
+        type: deviceInfo?.type || 'speaker',
         status,
         lastSeen: new Date(),
-        metadata: metadata ? {
-          clientId: metadata.clientId,
-          firmwareVersion: metadata.firmwareVersion,
-          uptime: metadata.uptime,
-          ipAddress: metadata.ipAddress,
+        metadata: deviceInfo ? {
+          clientId: deviceInfo.clientId,
+          firmwareVersion: deviceInfo.firmwareVersion,
+          uptime: deviceInfo.uptime,
+          ipAddress: deviceInfo.ipAddress,
         } : undefined,
       };
       this.devices.set(deviceId, device);
@@ -512,36 +512,36 @@ export class DeviceMqttClient extends EventEmitter {
       device.lastSeen = new Date();
       
       // Update metadata if provided
-      if (metadata) {
+      if (deviceInfo) {
         device.metadata = {
           ...device.metadata,
-          ...metadata,
+          ...deviceInfo,
         };
       }
     }
 
     this.emit(`device:${status}`, deviceId);
-    logger.info(`Device ${deviceId} is ${status}`, metadata || {});
+    logger.info(`Device ${deviceId} is ${status}`, deviceInfo || {});
 
-    // Upsert into MongoDB devices collection
+    // Upsert into MongoDB devices collection with clean flat structure
     try {
       const col = getCollection('devices');
       const doc: any = {
-        id: device.id,
-        type: device.type,
-        status: device.status,
-        lastSeen: device.lastSeen,
-        metadata: device.metadata || {},
+        deviceId: device.id,                      // Primary device ID (numeric like "313938")
+        clientId: deviceInfo?.clientId,           // MQTT client ID (like "313938-speaker")
+        hwId: deviceInfo?.hwId,                   // Hardware ID (long unique ID)
+        type: device.type,                        // Device type (speaker, sensor, etc)
+        status: device.status,                    // online/offline
+        lastSeen: device.lastSeen,                // Last heartbeat timestamp
+        firmwareVersion: deviceInfo?.firmwareVersion,
+        ipAddress: deviceInfo?.ipAddress,
+        uptime: deviceInfo?.uptime,
+        updatedAt: new Date(),
       };
-      // Normalize metadata fields for querying
-      if (device.metadata?.clientId) doc.clientId = device.metadata.clientId;
-      if (device.metadata?.firmwareVersion) doc.firmwareVersion = device.metadata.firmwareVersion;
-      if (device.metadata?.ipAddress) doc.ipAddress = device.metadata.ipAddress;
-      if (typeof device.metadata?.uptime === 'number') doc.uptime = device.metadata.uptime;
 
       col.updateOne(
-        { id: device.id },
-        { $set: doc },
+        { deviceId: device.id },  // Query by deviceId
+        { $set: doc, $setOnInsert: { createdAt: new Date() } },
         { upsert: true }
       ).catch(err => logger.error('Mongo upsert device failed', { err }));
     } catch (e) {

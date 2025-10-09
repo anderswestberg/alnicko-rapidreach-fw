@@ -831,17 +831,26 @@ static void heartbeat_work_handler(struct k_work *work)
     /* Get device info */
     size_t len = 0;
     const char *fw_ver = dev_info_get_fw_version_str(&len);
-    const char *device_id = dev_info_get_device_id_str(&len);
+    const char *device_id_full = dev_info_get_device_id_str(&len);
+    
+    /* Extract numeric device ID (first 6 chars) for consistent identification */
+    char device_id_numeric[7] = "000000";
+    if (device_id_full && len >= 6) {
+        strncpy(device_id_numeric, device_id_full, 6);
+        device_id_numeric[6] = '\0';
+    }
+    
     uint32_t uptime_sec = k_uptime_get_32() / 1000;
 
     /* Create heartbeat payload with full device info */
     ret = snprintf(payload, sizeof(payload), 
-                   "{\"alive\":true,\"seq\":%u,\"uptime\":%u,"
+                   "{\"alive\":true,\"deviceId\":\"%s\",\"seq\":%u,\"uptime\":%u,"
                    "\"version\":\"%s\",\"ip\":\"%s\",\"hwId\":\"%s\"}",
+                   device_id_numeric,
                    sequence_number++, uptime_sec,
                    fw_ver ? fw_ver : "unknown",
                    ip_addr,
-                   device_id ? device_id : "unknown");
+                   device_id_full ? device_id_full : "unknown");
     
     if (ret < 0 || ret >= sizeof(payload)) {
         LOG_ERR("Failed to create heartbeat payload");

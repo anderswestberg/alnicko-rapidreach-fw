@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Box,
   Button,
   Card,
   CardContent,
@@ -23,7 +22,8 @@ const getApiUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
   const protocol = window.location.protocol;
   const hostname = window.location.hostname;
-  return `${protocol}//${hostname}:3002/api`;
+  const port = window.location.port === '30080' ? '30002' : '3002';
+  return `${protocol}//${hostname}:${port}/api`;
 };
 
 const API_URL = getApiUrl();

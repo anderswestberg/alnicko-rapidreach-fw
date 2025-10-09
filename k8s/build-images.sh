@@ -31,58 +31,10 @@ cd ../device-server
 docker build -t ${REGISTRY}/device-server:${VERSION} .
 docker tag ${REGISTRY}/device-server:${VERSION} ${REGISTRY}/device-server:latest
 
-# Build web-app (multi-stage build for production)
+# Build web-app
 echo "Building web-app..."
 cd ../web-app
-cat > Dockerfile.prod << 'EOF'
-# Build stage
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-# Copy .npmrc if it exists for private registry authentication
-COPY .npmrc* ./
-RUN npm ci --legacy-peer-deps
-COPY . .
-ARG VITE_API_URL
-ARG VITE_API_KEY
-RUN npm run build
-
-# Production stage
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-EOF
-
-# Create nginx config if it doesn't exist
-if [ ! -f nginx.conf ]; then
-cat > nginx.conf << 'EOF'
-server {
-    listen 80;
-    server_name _;
-    root /usr/share/nginx/html;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api {
-        proxy_pass http://device-server:3002;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-EOF
-fi
-
-docker build -f Dockerfile.prod -t ${REGISTRY}/web-app:${VERSION} \
-  --build-arg VITE_API_URL=http://192.168.2.79:30002/api \
-  --build-arg VITE_API_KEY=dev-api-key-12345 .
+docker build -t ${REGISTRY}/web-app:${VERSION} .
 docker tag ${REGISTRY}/web-app:${VERSION} ${REGISTRY}/web-app:latest
 
 echo ""

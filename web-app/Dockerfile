@@ -1,4 +1,4 @@
-# Build stage
+# Build stage  
 FROM node:18-alpine as builder
 
 WORKDIR /app
@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Copy pre-installed node_modules from local dev (much faster than npm install)
+COPY node_modules ./node_modules
 
 # Copy source code
 COPY . .

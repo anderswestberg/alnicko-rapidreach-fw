@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { Card, CardContent, Typography, Alert, Box, Link } from '@mui/material';
 import { Title } from 'react-admin';
-import { useSearchParams } from 'react-router-dom';
 
 export const Terminal = () => {
-  const [searchParams] = useSearchParams();
+  // Get deviceId from URL hash params if any
+  const hash = window.location.hash;
+  const searchParams = new URLSearchParams(hash.split('?')[1] || '');
   const deviceId = searchParams.get('deviceId');
 
   useEffect(() => {

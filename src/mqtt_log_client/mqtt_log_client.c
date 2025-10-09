@@ -306,6 +306,7 @@ int mqtt_log_client_init(void)
 	s.consecutive_failures = 0;
 	s.fs_init_retry_count = 0;
 
+
 	/* Try to enable FS overflow */
 #ifdef CONFIG_RPR_MODULE_FILE_MANAGER
 	/* Ensure file manager is initialized first */

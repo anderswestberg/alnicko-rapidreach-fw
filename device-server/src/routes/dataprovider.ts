@@ -63,10 +63,10 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
         .limit(limit);
       const items = await cursor.toArray();
       
-      // Transform _id to id for React-Admin
+      // Transform _id to id for React-Admin (always use MongoDB _id as the id)
       const transformedItems = items.map(item => ({
         ...item,
-        id: item._id || item.id,
+        id: item._id?.toString() || item.id,
       }));
 
       // Return data in React-Admin expected format
@@ -97,12 +97,17 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
       let query: any;
       try {
         if (ObjectId.isValid(id) && id.length === 24) {
-          query = { $or: [{ _id: new ObjectId(id) }, { _id: id }, { id }] };
+          query = { $or: [{ _id: new ObjectId(id) }, { _id: id }, { deviceId: id }, { id }] };
         } else {
-          query = { $or: [{ id }, { _id: id }, { clientId: id }] };
+          // For devices, prefer deviceId lookup; for others use id
+          if (resource === 'devices') {
+            query = { $or: [{ deviceId: id }, { clientId: id }, { id }, { _id: id }] };
+          } else {
+            query = { $or: [{ id }, { _id: id }] };
+          }
         }
       } catch (e) {
-        query = { $or: [{ id }, { _id: id }, { clientId: id }] };
+        query = { $or: [{ id }, { _id: id }, { deviceId: id }] };
       }
       
       col.findOne(query).then((doc) => {
@@ -110,10 +115,10 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
           res.status(404).json({ error: 'Record not found' });
           return;
         }
-        // Transform _id to id for React-Admin
+        // Transform _id to id for React-Admin (always use MongoDB _id)
         const transformed = {
           ...doc,
-          id: doc._id || doc.id,
+          id: doc._id?.toString() || doc.id,
         };
         res.json(transformed);
       }).catch((err) => {
