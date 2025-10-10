@@ -22,3 +22,8 @@ if(CONFIG_HTTP_LOG_CLIENT)
     target_link_libraries(app PUBLIC http_log_client)
 endif()
 
+# Link shell backend monitor if enabled
+if(CONFIG_SHELL_BACKEND_MQTT)
+    target_link_libraries(app PUBLIC ..__..__src__shell_backend_monitor)
+endif()
+

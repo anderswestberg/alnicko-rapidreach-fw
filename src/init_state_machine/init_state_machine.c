@@ -48,6 +48,10 @@ static const uint32_t allowed_events[STATE_MAX] = {
     
     [STATE_NETWORK_STABILIZE] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_TIMEOUT),
     
+    [STATE_WAIT_SHELL_MQTT] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_SHELL_MQTT_CONNECTED) | BIT(EVENT_TIMEOUT),
+    
+    [STATE_SHELL_MQTT_READY] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_TIMEOUT),
+    
     [STATE_DEVICE_REG_START] = BIT(EVENT_NETWORK_DOWN) | BIT(EVENT_REG_SUCCESS) | 
                                BIT(EVENT_REG_FAILURE) | BIT(EVENT_REG_RETRY_NEEDED) | 
                                BIT(EVENT_TIMEOUT) | BIT(EVENT_RETRY),
@@ -90,6 +94,8 @@ static void state_init_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_wait_network_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_network_ready_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_network_stabilize_handler(init_sm_context_t *ctx, init_event_t event);
+static void state_wait_shell_mqtt_handler(init_sm_context_t *ctx, init_event_t event);
+static void state_shell_mqtt_ready_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_start_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_in_progress_handler(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_complete_handler(init_sm_context_t *ctx, init_event_t event);
@@ -103,6 +109,8 @@ static void state_init_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_wait_network_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_network_ready_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_network_stabilize_entry(init_sm_context_t *ctx, init_event_t event);
+static void state_wait_shell_mqtt_entry(init_sm_context_t *ctx, init_event_t event);
+static void state_shell_mqtt_ready_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_start_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_in_progress_entry(init_sm_context_t *ctx, init_event_t event);
 static void state_device_reg_complete_entry(init_sm_context_t *ctx, init_event_t event);
@@ -139,6 +147,18 @@ static const state_info_t state_table[STATE_MAX] = {
         .entry = state_network_stabilize_entry,
         .exit = state_common_exit,
         .handler = state_network_stabilize_handler
+    },
+    [STATE_WAIT_SHELL_MQTT] = {
+        .name = "WAIT_SHELL_MQTT",
+        .entry = state_wait_shell_mqtt_entry,
+        .exit = state_common_exit,
+        .handler = state_wait_shell_mqtt_handler
+    },
+    [STATE_SHELL_MQTT_READY] = {
+        .name = "SHELL_MQTT_READY",
+        .entry = state_shell_mqtt_ready_entry,
+        .exit = state_common_exit,
+        .handler = state_shell_mqtt_ready_handler
     },
     [STATE_DEVICE_REG_START] = {
         .name = "DEVICE_REG_START",
@@ -356,10 +376,32 @@ static void state_network_ready_entry(init_sm_context_t *ctx, init_event_t event
 
 static void state_network_stabilize_entry(init_sm_context_t *ctx, init_event_t event)
 {
-    LOG_INF("Entering NETWORK_STABILIZE state - waiting 15 seconds for network and shell MQTT to stabilize");
+    LOG_INF("Entering NETWORK_STABILIZE state - waiting 5 seconds for network to stabilize");
     
-    /* Start a 15 second timeout to let shell MQTT connect first */
-    k_work_schedule(&ctx->timeout_work, K_SECONDS(15));
+    /* Start a 5 second timeout to let network stabilize */
+    k_work_schedule(&ctx->timeout_work, K_SECONDS(5));
+}
+
+static void state_wait_shell_mqtt_entry(init_sm_context_t *ctx, init_event_t event)
+{
+    LOG_INF("Entering WAIT_SHELL_MQTT state - waiting for shell MQTT to connect");
+    
+#ifdef CONFIG_SHELL_BACKEND_MQTT
+    /* Start monitoring for shell MQTT connection */
+    extern void shell_mqtt_detector_start(void);
+    shell_mqtt_detector_start();
+#endif
+    
+    /* Start a 30 second timeout for shell MQTT to connect */
+    k_work_schedule(&ctx->timeout_work, K_SECONDS(30));
+}
+
+static void state_shell_mqtt_ready_entry(init_sm_context_t *ctx, init_event_t event)
+{
+    LOG_INF("Entering SHELL_MQTT_READY state - shell MQTT connected, waiting 3 seconds before main MQTT");
+    
+    /* Start a 3 second delay to ensure shell MQTT is stable */
+    k_work_schedule(&ctx->timeout_work, K_SECONDS(3));
 }
 
 static void state_device_reg_start_entry(init_sm_context_t *ctx, init_event_t event)
@@ -520,7 +562,53 @@ static void state_network_stabilize_handler(init_sm_context_t *ctx, init_event_t
 {
     switch (event) {
     case EVENT_TIMEOUT:
-        LOG_INF("Network stabilization delay complete, proceeding to next stage");
+        LOG_INF("Network stabilization delay complete, waiting for shell MQTT");
+        
+        /* Transition to wait for shell MQTT connection */
+        state_transition(ctx, STATE_WAIT_SHELL_MQTT);
+        break;
+        
+    case EVENT_NETWORK_DOWN:
+        LOG_WRN("Network lost during stabilization delay");
+        state_transition(ctx, STATE_WAIT_NETWORK);
+        break;
+        
+    default:
+        LOG_DBG("Event %d in NETWORK_STABILIZE state", event);
+        break;
+    }
+}
+
+static void state_wait_shell_mqtt_handler(init_sm_context_t *ctx, init_event_t event)
+{
+    switch (event) {
+    case EVENT_SHELL_MQTT_CONNECTED:
+        LOG_INF("Shell MQTT connected successfully");
+        state_transition(ctx, STATE_SHELL_MQTT_READY);
+        break;
+        
+    case EVENT_TIMEOUT:
+        LOG_WRN("Timeout waiting for shell MQTT, proceeding anyway");
+        /* Proceed to shell MQTT ready state even on timeout */
+        state_transition(ctx, STATE_SHELL_MQTT_READY);
+        break;
+        
+    case EVENT_NETWORK_DOWN:
+        LOG_WRN("Network lost while waiting for shell MQTT");
+        state_transition(ctx, STATE_WAIT_NETWORK);
+        break;
+        
+    default:
+        LOG_DBG("Event %d in WAIT_SHELL_MQTT state", event);
+        break;
+    }
+}
+
+static void state_shell_mqtt_ready_handler(init_sm_context_t *ctx, init_event_t event)
+{
+    switch (event) {
+    case EVENT_TIMEOUT:
+        LOG_INF("Shell MQTT stabilization complete, proceeding to next stage");
         
         /* Now proceed to device registration or MQTT */
 #ifdef CONFIG_RPR_MODULE_DEVICE_REGISTRY
@@ -547,12 +635,12 @@ static void state_network_stabilize_handler(init_sm_context_t *ctx, init_event_t
         break;
         
     case EVENT_NETWORK_DOWN:
-        LOG_WRN("Network lost during stabilization delay");
+        LOG_WRN("Network lost during shell MQTT stabilization");
         state_transition(ctx, STATE_WAIT_NETWORK);
         break;
         
     default:
-        LOG_DBG("Event %d in NETWORK_STABILIZE state", event);
+        LOG_DBG("Event %d in SHELL_MQTT_READY state", event);
         break;
     }
 }

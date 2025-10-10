@@ -24,6 +24,8 @@ typedef enum {
     STATE_WAIT_NETWORK,              /**< Waiting for network connectivity */
     STATE_NETWORK_READY,             /**< Network available, ready to proceed */
     STATE_NETWORK_STABILIZE,         /**< Delay state to let network stabilize */
+    STATE_WAIT_SHELL_MQTT,           /**< Waiting for shell MQTT to connect */
+    STATE_SHELL_MQTT_READY,          /**< Shell MQTT connected, wait before main MQTT */
     STATE_DEVICE_REG_START,          /**< Starting device registration */
     STATE_DEVICE_REG_IN_PROGRESS,    /**< Registration in progress */
     STATE_DEVICE_REG_COMPLETE,       /**< Registration complete (success or fallback) */
@@ -41,6 +43,7 @@ typedef enum {
     EVENT_START = 0,                 /**< Start the state machine */
     EVENT_NETWORK_UP,                /**< Network interface is up */
     EVENT_NETWORK_DOWN,              /**< Network interface is down */
+    EVENT_SHELL_MQTT_CONNECTED,      /**< Shell MQTT connected */
     EVENT_REG_SUCCESS,               /**< Device registration succeeded */
     EVENT_REG_FAILURE,               /**< Device registration failed (use fallback) */
     EVENT_REG_RETRY_NEEDED,          /**< Registration needs retry */

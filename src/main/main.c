@@ -178,6 +178,12 @@ int main(void)
     }
 #endif
 
+#ifdef CONFIG_SHELL_BACKEND_MQTT
+    /* Initialize shell MQTT detector */
+    extern void shell_mqtt_detector_init(void);
+    shell_mqtt_detector_init();
+#endif
+
 #ifdef CONFIG_RPR_MODULE_INIT_SM
     /* Initialize and start the state machine for system startup */
     ret = init_state_machine_init();
