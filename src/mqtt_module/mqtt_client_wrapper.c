@@ -22,8 +22,12 @@
 #include <zephyr/kernel/thread_stack.h>
 #include <string.h>
 #include <errno.h>
+#include <stdio.h>
+#include <zephyr/fs/fs.h>
+#include "mqtt_message_parser.h"
+#include "cJSON.h"
 
-LOG_MODULE_REGISTER(mqtt_wrapper, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
+LOG_MODULE_REGISTER(mqtt_wrapper, LOG_LEVEL_DBG);
 
 /* Utility allocation helpers for thread stacks */
 static void *alloc_thread_stack_mem(size_t requested_size)
@@ -496,15 +500,260 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                         }
                     }
                 } else {
-                    /* Large message - just consume it for now */
-                    LOG_WRN("Large audio message (%u bytes) - discarding (streaming not yet implemented)", 
-                            pub->message.payload.len);
-                    uint8_t discard[512];
-                    size_t remaining = pub->message.payload.len;
-                    while (remaining > 0) {
-                        size_t chunk = MIN(remaining, sizeof(discard));
-                        mqtt_read_publish_payload_blocking(client, discard, chunk);
-                        remaining -= chunk;
+                    /* Large message - check if it's audio and handle accordingly */
+                    if (strstr(topic, "rapidreach/audio/") != NULL) {
+                        LOG_INF("Processing large audio message (%u bytes) via streaming to file", 
+                                pub->message.payload.len);
+                        
+                        /* First, read up to 512 bytes to get the JSON header */
+                        uint8_t json_buf[512];
+                        size_t total_len = pub->message.payload.len;
+                        size_t json_read = MIN(total_len, sizeof(json_buf));
+                        int ret = mqtt_read_publish_payload_blocking(client, json_buf, json_read);
+                        if (ret < 0) {
+                            LOG_ERR("Failed to read JSON header: %d", ret);
+                        } else {
+                                /* Skip 4-byte hex length header */
+                                int json_start = 4;
+                                
+                                /* Find the end of JSON */
+                                int json_end = -1;
+                                int brace_count = 0;
+                                bool in_string = false;
+                                bool escape_next = false;
+                                
+                                for (int i = json_start; i < (int)json_read; i++) {
+                                    if (!escape_next) {
+                                        if (json_buf[i] == '"' && !in_string) {
+                                            in_string = true;
+                                        } else if (json_buf[i] == '"' && in_string) {
+                                            in_string = false;
+                                        } else if (!in_string) {
+                                            if (json_buf[i] == '{') brace_count++;
+                                            else if (json_buf[i] == '}') {
+                                                brace_count--;
+                                                if (brace_count == 0) {
+                                                    json_end = i;
+                                                    break;
+                                                }
+                                            }
+                                        } else if (json_buf[i] == '\\') {
+                                            escape_next = true;
+                                            continue;
+                                        }
+                                    }
+                                    escape_next = false;
+                                }
+                            
+                            if (json_end >= 0) {
+                                /* Parse JSON header */
+                                json_buf[json_end + 1] = '\0';
+                                
+                                
+                                /* Parse JSON directly for file-based audio */
+                                LOG_INF("JSON header (%d bytes): %.*s", json_end - json_start + 1, json_end - json_start + 1, &json_buf[json_start]);
+                                
+                                cJSON *root = cJSON_Parse((const char *)&json_buf[json_start]);
+                                if (root) {
+                                    cJSON *saveToFile = cJSON_GetObjectItem(root, "saveToFile");
+                                    cJSON *filename = cJSON_GetObjectItem(root, "filename");
+                                    
+                                    LOG_INF("saveToFile field: %s, filename field: %s",
+                                            saveToFile ? (cJSON_IsBool(saveToFile) ? (cJSON_IsTrue(saveToFile) ? "true" : "false") : "not bool") : "null",
+                                            filename ? (cJSON_IsString(filename) ? filename->valuestring : "not string") : "null");
+                                    
+                                    /* For large messages, always save to file (temporary or permanent) */
+                                    if (cJSON_IsString(filename) && filename->valuestring) {
+                                        /* Determine if this is permanent or temporary storage */
+                                        bool is_permanent = cJSON_IsBool(saveToFile) && cJSON_IsTrue(saveToFile);
+                                        
+                                        /* Open file for writing */
+                                        struct fs_file_t file;
+                                        fs_file_t_init(&file);
+                                        
+                                        char filepath[128];
+                                        if (is_permanent) {
+                                            snprintf(filepath, sizeof(filepath), "/lfs/%s", filename->valuestring);
+                                        } else {
+                                            /* Use temp prefix for temporary files */
+                                            snprintf(filepath, sizeof(filepath), "/lfs/temp_%s", filename->valuestring);
+                                        }
+                                    
+                                    ret = fs_open(&file, filepath, FS_O_CREATE | FS_O_WRITE);
+                                    if (ret == 0) {
+                                        LOG_INF("Writing audio to %s file: %s", 
+                                                is_permanent ? "permanent" : "temporary", filepath);
+                                        
+                                        /* Calculate how much audio data is in the first chunk */
+                                        size_t header_total_size = json_end + 1;  /* Total header size including 4-byte prefix */
+                                        size_t audio_in_first = json_read - header_total_size;
+                                        if (audio_in_first > 0) {
+                                            LOG_INF("Writing first chunk: %zu bytes (header was %zu bytes)", 
+                                                    audio_in_first, header_total_size);
+                                            ret = fs_write(&file, &json_buf[json_end + 1], audio_in_first);
+                                            if (ret < 0) {
+                                                LOG_ERR("Failed to write first chunk: %d", ret);
+                                                fs_close(&file);
+                                                /* Consume rest of payload */
+                                                size_t remaining = total_len - json_read;
+                                                uint8_t discard[512];
+                                                while (remaining > 0) {
+                                                    size_t chunk = MIN(remaining, sizeof(discard));
+                                                    mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                                    remaining -= chunk;
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        
+                                        /* Read and write remaining data in chunks */
+                                        size_t bytes_written = audio_in_first;
+                                        size_t remaining = total_len - json_read;
+                                        uint8_t chunk_buf[256];  /* Smaller chunks for better responsiveness */
+                                        
+                                        LOG_INF("Starting to write remaining %zu bytes (total payload: %zu, already read: %zu)", 
+                                                remaining, total_len, json_read);
+                                        LOG_INF("Audio data: first chunk %zu bytes, expecting %zu more bytes", 
+                                                audio_in_first, remaining);
+                                        
+                                        int loop_count = 0;
+                                        while (remaining > 0) {
+                                            size_t chunk_size = MIN(remaining, sizeof(chunk_buf));
+                                            
+                                            LOG_DBG("Reading chunk %d: %zu bytes (remaining: %zu)", 
+                                                    loop_count++, chunk_size, remaining);
+                                            
+                                            /* Add timeout detection */
+                                            uint32_t start_time = k_uptime_get_32();
+                                            ret = mqtt_read_publish_payload_blocking(client, chunk_buf, chunk_size);
+                                            uint32_t elapsed = k_uptime_get_32() - start_time;
+                                            
+                                            if (elapsed > 1000) {
+                                                LOG_WRN("MQTT read took %u ms", elapsed);
+                                            }
+                                            
+                                            if (ret < 0) {
+                                                LOG_ERR("Failed to read chunk: %d", ret);
+                                                break;
+                                            } else if (ret == 0) {
+                                                LOG_ERR("Read returned 0 bytes, expected %zu", chunk_size);
+                                                break;
+                                            }
+                                            
+                                            LOG_DBG("Read %d bytes, writing to file...", ret);
+                                            
+                                            int write_ret = fs_write(&file, chunk_buf, ret);
+                                            if (write_ret < 0) {
+                                                LOG_ERR("Failed to write chunk: %d", write_ret);
+                                                break;
+                                            }
+                                            
+                                            bytes_written += ret;
+                                            remaining -= ret;
+                                            
+                                            /* Yield more frequently to prevent blocking */
+                                            k_yield();
+                                            
+                                            /* Progress log every 4KB for debugging */
+                                            if (bytes_written % 4096 == 0) {
+                                                LOG_INF("Progress: %zu/%zu bytes written", bytes_written, total_len);
+                                            }
+                                        }
+                                        
+                                        LOG_INF("Loop complete - bytes_written: %zu, remaining: %zu", 
+                                                bytes_written, remaining);
+                                        
+                                        if (remaining == 0) {
+                                            LOG_INF("All data read successfully, syncing file...");
+                                        } else {
+                                            LOG_ERR("Loop exited with %zu bytes remaining!", remaining);
+                                        }
+                                        
+                                        /* Sync file to ensure data is written */
+                                        fs_sync(&file);
+                                        LOG_INF("Closing file...");
+                                        fs_close(&file);
+                                        LOG_INF("Audio file written: %zu bytes", bytes_written);
+                                        
+                                        /* Queue for playback if handler exists */
+                                        if (handler) {
+                                            /* Create a minimal message with file reference */
+                                            char msg_buf[256];
+                                            int msg_len = snprintf(msg_buf, sizeof(msg_buf),
+                                                "\x00\x01{\"file\":\"%s\"}", filepath);
+                                            
+                                            struct mqtt_msg_work *work = k_malloc(sizeof(*work));
+                                            if (work) {
+                                                strncpy(work->topic, topic, sizeof(work->topic) - 1);
+                                                work->callback = handler;
+                                                work->user_data = user_data;
+                                                work->payload = k_malloc(msg_len);
+                                                if (work->payload) {
+                                                    memcpy(work->payload, msg_buf, msg_len);
+                                                    work->payload_len = msg_len;
+                                                    k_work_submit(&work->work);
+                                                } else {
+                                                    k_free(work);
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        LOG_ERR("Failed to open file %s: %d", filepath, ret);
+                                        /* Consume remaining data */
+                                        size_t remaining = total_len - json_read;
+                                        uint8_t discard[512];
+                                        while (remaining > 0) {
+                                            size_t chunk = MIN(remaining, sizeof(discard));
+                                            mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                            remaining -= chunk;
+                                        }
+                                    }
+                                    } else {
+                                        /* Not for file or parse failed - consume data */
+                                        LOG_WRN("Audio message not for file storage or missing filename");
+                                        size_t remaining = total_len - json_read;
+                                        uint8_t discard[512];
+                                        while (remaining > 0) {
+                                            size_t chunk = MIN(remaining, sizeof(discard));
+                                            mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                            remaining -= chunk;
+                                        }
+                                    }
+                                    cJSON_Delete(root);
+                                } else {
+                                    LOG_ERR("Failed to parse JSON header");
+                                    /* Consume remaining data */
+                                    size_t remaining = total_len - json_read;
+                                    uint8_t discard[512];
+                                    while (remaining > 0) {
+                                        size_t chunk = MIN(remaining, sizeof(discard));
+                                        mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                        remaining -= chunk;
+                                    }
+                                }
+                            } else {
+                                /* JSON not complete in first chunk - consume data */
+                                LOG_ERR("JSON header not found in first 512 bytes");
+                                size_t remaining = total_len - json_read;
+                                uint8_t discard[512];
+                                while (remaining > 0) {
+                                    size_t chunk = MIN(remaining, sizeof(discard));
+                                    mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                    remaining -= chunk;
+                                }
+                            }
+                        }
+                    } else {
+                        /* Non-audio large message - just consume it */
+                        LOG_WRN("Large non-audio message (%u bytes) - discarding", 
+                                pub->message.payload.len);
+                        uint8_t discard[512];
+                        size_t remaining = pub->message.payload.len;
+                        while (remaining > 0) {
+                            size_t chunk = MIN(remaining, sizeof(discard));
+                            mqtt_read_publish_payload_blocking(client, discard, chunk);
+                            remaining -= chunk;
+                        }
                     }
                 }
             }

@@ -231,6 +231,28 @@ int mqtt_parse_json_metadata(const char *json_str,
         strncpy(metadata->filename, filename->valuestring, sizeof(metadata->filename) - 1);
     }
     
+    /* Parse multi-part message fields */
+    cJSON *transferId = cJSON_GetObjectItem(root, "transferId");
+    if (cJSON_IsString(transferId) && transferId->valuestring) {
+        strncpy(metadata->transfer_id, transferId->valuestring, sizeof(metadata->transfer_id) - 1);
+        metadata->is_multipart = true;
+    }
+    
+    cJSON *partNumber = cJSON_GetObjectItem(root, "partNumber");
+    if (cJSON_IsNumber(partNumber)) {
+        metadata->part_number = (uint32_t)partNumber->valuedouble;
+    }
+    
+    cJSON *totalParts = cJSON_GetObjectItem(root, "totalParts");
+    if (cJSON_IsNumber(totalParts)) {
+        metadata->total_parts = (uint32_t)totalParts->valuedouble;
+    }
+    
+    cJSON *totalSize = cJSON_GetObjectItem(root, "totalSize");
+    if (cJSON_IsNumber(totalSize)) {
+        metadata->total_size = (uint32_t)totalSize->valuedouble;
+    }
+    
     /* Validate required field */
     if (metadata->opus_data_size == 0) {
         cJSON_Delete(root);

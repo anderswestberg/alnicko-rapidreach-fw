@@ -2941,10 +2941,10 @@ static int cmd_device_info(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "Uptime: %02u:%02u:%02u", hours, minutes, seconds);
     
     /* Add IP address - check different interfaces */
+#ifdef CONFIG_RPR_ETHERNET
     struct net_if *iface;
     const struct net_if_config *cfg;
     
-#ifdef CONFIG_RPR_ETHERNET
     iface = net_if_get_default();
     if (iface) {
         cfg = net_if_get_config(iface);
@@ -2969,6 +2969,152 @@ static int cmd_test(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
+/**
+ * @brief Delete files with wildcard support
+ * Usage: app rm <pattern>
+ * Examples: 
+ *   app rm temp_*  - Delete all files starting with temp_
+ *   app rm *.opus  - Delete all opus files
+ *   app rm -all    - Delete all files in /lfs
+ */
+static int cmd_rm_wildcard(const struct shell *sh, size_t argc, char **argv)
+{
+    if (argc < 2) {
+        shell_error(sh, "Usage: app rm <pattern|-all>");
+        shell_print(sh, "Examples:");
+        shell_print(sh, "  app rm temp_*  - Delete files starting with temp_");
+        shell_print(sh, "  app rm *.opus  - Delete all .opus files");
+        shell_print(sh, "  app rm -all    - Delete all files");
+        return -EINVAL;
+    }
+
+    struct fs_dir_t dir;
+    struct fs_dirent entry;
+    char full_path[128];
+    int deleted_count = 0;
+    const char *pattern = argv[1];
+    bool delete_all = (strcmp(pattern, "-all") == 0);
+    
+    fs_dir_t_init(&dir);
+    
+    if (fs_opendir(&dir, "/lfs") != 0) {
+        shell_error(sh, "Failed to open /lfs directory");
+        return -ENOENT;
+    }
+    
+    shell_print(sh, "Scanning for files matching pattern: %s", pattern);
+    
+    while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != 0) {
+        if (entry.type == FS_DIR_ENTRY_FILE) {
+            bool should_delete = delete_all;
+            
+            if (!delete_all) {
+                /* Simple wildcard matching */
+                if (pattern[0] == '*') {
+                    /* Suffix match: *.ext */
+                    const char *suffix = pattern + 1;
+                    size_t name_len = strlen(entry.name);
+                    size_t suffix_len = strlen(suffix);
+                    if (name_len >= suffix_len) {
+                        should_delete = (strcmp(entry.name + name_len - suffix_len, suffix) == 0);
+                    }
+                } else if (pattern[strlen(pattern) - 1] == '*') {
+                    /* Prefix match: prefix* */
+                    size_t prefix_len = strlen(pattern) - 1;
+                    should_delete = (strncmp(entry.name, pattern, prefix_len) == 0);
+                } else {
+                    /* Exact match */
+                    should_delete = (strcmp(entry.name, pattern) == 0);
+                }
+            }
+            
+            if (should_delete) {
+                snprintf(full_path, sizeof(full_path), "/lfs/%s", entry.name);
+                int ret = fs_unlink(full_path);
+                if (ret == 0) {
+                    shell_print(sh, "Deleted: %s", entry.name);
+                    deleted_count++;
+                } else {
+                    shell_error(sh, "Failed to delete %s: %d", entry.name, ret);
+                }
+            }
+        }
+    }
+    
+    fs_closedir(&dir);
+    
+    if (deleted_count > 0) {
+        shell_print(sh, "Successfully deleted %d file(s)", deleted_count);
+    } else {
+        shell_warn(sh, "No files matched pattern: %s", pattern);
+    }
+    
+    return 0;
+}
+
+/**
+ * @brief List files in /lfs with size and count information
+ */
+static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
+{
+    struct fs_dir_t dir;
+    struct fs_dirent entry;
+    struct fs_statvfs stats;
+    int file_count = 0;
+    int temp_count = 0;
+    size_t total_size = 0;
+    size_t temp_size = 0;
+    
+    fs_dir_t_init(&dir);
+    
+    if (fs_opendir(&dir, "/lfs") != 0) {
+        shell_error(sh, "Failed to open /lfs directory");
+        return -ENOENT;
+    }
+    
+    shell_print(sh, "Files in /lfs:");
+    shell_print(sh, "%-30s %10s", "Name", "Size");
+    shell_print(sh, "----------------------------------------");
+    
+    while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != 0) {
+        if (entry.type == FS_DIR_ENTRY_FILE) {
+            shell_print(sh, "%-30s %10zu", entry.name, entry.size);
+            file_count++;
+            total_size += entry.size;
+            
+            /* Track temporary files */
+            if (strncmp(entry.name, "temp_", 5) == 0) {
+                temp_count++;
+                temp_size += entry.size;
+            }
+        }
+    }
+    
+    fs_closedir(&dir);
+    
+    shell_print(sh, "----------------------------------------");
+    shell_print(sh, "Total: %d files, %zu bytes", file_count, total_size);
+    if (temp_count > 0) {
+        shell_print(sh, "Temp:  %d files, %zu bytes", temp_count, temp_size);
+    }
+    
+    /* Get filesystem stats */
+    if (fs_statvfs("/lfs", &stats) == 0) {
+        size_t total_space = stats.f_blocks * stats.f_frsize;
+        size_t free_space = stats.f_bfree * stats.f_frsize;
+        size_t used_space = total_space - free_space;
+        
+        shell_print(sh, "\nFilesystem usage:");
+        shell_print(sh, "  Total: %zu KB", total_space / 1024);
+        shell_print(sh, "  Used:  %zu KB (%d%%)", used_space / 1024, 
+                   (int)((used_space * 100) / total_space));
+        shell_print(sh, "  Free:  %zu KB (%d%%)", free_space / 1024,
+                   (int)((free_space * 100) / total_space));
+    }
+    
+    return 0;
+}
+
 /* ------------ Root app Command ------------ */
 SHELL_STATIC_SUBCMD_SET_CREATE(
         sub_app,
@@ -2990,6 +3136,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(dfu, &sub_dfu, "DFU management commands", NULL),
         SHELL_CMD(rtc, &rtc_cmds, "RTC commands", NULL),
         SHELL_CMD(test, NULL, "Test command", cmd_test),
+        SHELL_CMD(ls, NULL, "List files in /lfs", cmd_ls),
+        SHELL_CMD(rm, NULL, "Remove files with wildcard support", cmd_rm_wildcard),
         SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(app, &sub_app, "Application commands", NULL);

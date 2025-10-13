@@ -35,6 +35,12 @@ typedef struct {
     uint32_t volume;             /**< Volume level (0-100) */
     bool interrupt_current;      /**< Whether to interrupt currently playing audio */
     uint32_t json_header_size;   /**< Size of the JSON header itself */
+    /* Multi-part message support */
+    char transfer_id[32];        /**< Unique ID for multi-part transfers */
+    uint32_t part_number;        /**< Part number (0-based) */
+    uint32_t total_parts;        /**< Total number of parts */
+    uint32_t total_size;         /**< Total size across all parts */
+    bool is_multipart;           /**< Whether this is a multi-part message */
 } mqtt_message_metadata_t;
 
 /**

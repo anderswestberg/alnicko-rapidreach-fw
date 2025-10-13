@@ -40,8 +40,8 @@ LOG_MODULE_REGISTER(mqtt_module, CONFIG_RPR_MODULE_MQTT_LOG_LEVEL);
 /* MQTT client instance */
 static struct mqtt_client client;
 static struct sockaddr_storage broker;
-static uint8_t rx_buffer[4096];   /* 4KB for receiving - audio will be chunked */
-static uint8_t tx_buffer[1024];   /* 1KB for sending (heartbeats, etc) */
+static uint8_t rx_buffer[8192];   /* 8KB for receiving - supports larger messages */
+static uint8_t tx_buffer[2048];   /* 2KB for sending (heartbeats, logs) */
 static char client_id_buffer[32];  /* Buffer for "rr-speaker-XXXXX" format */
 
 /* Heartbeat task control */
@@ -436,7 +436,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
              * This means MQTT packets (including keepalives) cannot be processed
              * during the ~1.3 second file write operation. The 60-second keepalive
              * timeout should be sufficient to handle this delay. */
-            uint8_t chunk_buf[64];  /* Very small chunks for maximum responsiveness */
+            uint8_t chunk_buf[512];  /* Larger chunks for better throughput */
             int64_t start_time = k_uptime_get();
             LOG_INF("Starting file write at time: %lld", start_time);
             

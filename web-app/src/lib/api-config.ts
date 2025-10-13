@@ -16,7 +16,9 @@ export const getApiUrl = () => {
   const currentPort = window.location.port;
   
   // If accessing via domain name (no port or standard ports), use same origin /api
-  if (!currentPort || currentPort === '80' || currentPort === '443') {
+  // Also use same origin for k3s ingress ports (8080/8443)
+  if (!currentPort || currentPort === '80' || currentPort === '443' || 
+      currentPort === '8080' || currentPort === '8443') {
     console.log('Auto-detected API URL (same origin):', '/api');
     return '/api';
   }
