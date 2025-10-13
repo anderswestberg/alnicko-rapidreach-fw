@@ -13,10 +13,11 @@ if RPR_MQTT_CLIENT_WRAPPER
 
 config MQTT_WRAPPER_PROTOCOL_STACK_SIZE
     int "Protocol thread stack size"
-    default 12288
+    default 16384
     help
       Stack size for the MQTT protocol thread that handles mqtt_input(),
-      mqtt_live(), and reconnection logic. Increased to handle event processing safely.
+      mqtt_live(), and reconnection logic. Increased to 16KB to handle large
+      file operations in deeply nested event handlers.
 
 config MQTT_WRAPPER_WORKER_STACK_SIZE
     int "Worker thread stack size"

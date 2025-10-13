@@ -58,6 +58,9 @@ struct mqtt_client_wrapper {
     /* MQTT client */
     struct mqtt_client client;
     struct sockaddr_storage broker;
+    
+    /* Flag to indicate large message was just processed */
+    volatile bool large_msg_processed;
     uint8_t rx_buffer[CONFIG_MQTT_WRAPPER_RX_BUFFER_SIZE];
     uint8_t tx_buffer[CONFIG_MQTT_WRAPPER_TX_BUFFER_SIZE];
     char client_id[64];
@@ -234,6 +237,7 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     /* Set defaults */
     w->auto_reconnect = true;
     w->reconnect_interval_ms = CONFIG_MQTT_WRAPPER_RECONNECT_MIN_INTERVAL_MS;
+    w->large_msg_processed = false;
     
     LOG_INF("MQTT wrapper initialized: %s", w->client_id);
     return (mqtt_handle_t)w;
@@ -281,6 +285,13 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                     w->connected = false;
                     k_mutex_unlock(&w->state_mutex);
                     continue;
+                }
+                
+                /* If we just processed a large message, give MQTT client time to settle */
+                if (w->large_msg_processed) {
+                    LOG_DBG("Large message processed, adding delay before next poll");
+                    w->large_msg_processed = false;
+                    k_sleep(K_MSEC(50));
                 }
             } else if (ret < 0) {
                 LOG_ERR("MQTT wrapper poll error: %d", ret);
@@ -406,6 +417,22 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
     case MQTT_EVT_PUBLISH:
         {
             const struct mqtt_publish_param *pub = &evt->param.publish;
+            static uint32_t last_message_id = 0;
+            static int64_t last_publish_time = 0;
+            int64_t now = k_uptime_get();
+            
+            LOG_DBG("MQTT_EVT_PUBLISH: msg_id=%u, topic=%.*s, len=%u, time_since_last=%lld",
+                    pub->message_id,
+                    pub->message.topic.topic.size, pub->message.topic.topic.utf8,
+                    pub->message.payload.len,
+                    now - last_publish_time);
+                    
+            if (pub->message_id == last_message_id && (now - last_publish_time) < 100) {
+                LOG_WRN("Duplicate MQTT_EVT_PUBLISH detected! msg_id=%u", pub->message_id);
+            }
+            
+            last_message_id = pub->message_id;
+            last_publish_time = now;
             
             /* Send PUBACK immediately */
             if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
@@ -484,8 +511,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                             size_t remaining = pub->message.payload.len;
                             while (remaining > 0) {
                                 size_t chunk = MIN(remaining, sizeof(discard));
-                                mqtt_read_publish_payload_blocking(client, discard, chunk);
-                                remaining -= chunk;
+                                int discard_ret = mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                if (discard_ret <= 0) break;
+                                remaining -= discard_ret;
                             }
                         }
                     } else {
@@ -505,14 +533,40 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                         LOG_INF("Processing large audio message (%u bytes) via streaming to file", 
                                 pub->message.payload.len);
                         
+                        /* Mark that we're processing a large message */
+                        w->large_msg_processed = true;
+                        
                         /* First, read up to 512 bytes to get the JSON header */
                         uint8_t json_buf[512];
                         size_t total_len = pub->message.payload.len;
                         size_t json_read = MIN(total_len, sizeof(json_buf));
+                        
+                        LOG_DBG("Audio message: total_len=%zu, reading first %zu bytes", total_len, json_read);
                         int ret = mqtt_read_publish_payload_blocking(client, json_buf, json_read);
+                        LOG_DBG("Initial read returned %d bytes (requested %zu)", ret, json_read);
                         if (ret < 0) {
                             LOG_ERR("Failed to read JSON header: %d", ret);
-                        } else {
+                            /* CRITICAL: Must consume the ENTIRE message to keep MQTT client in sync */
+                            size_t remaining = total_len;  /* ALL bytes since none were read */
+                            uint8_t discard[512];
+                            while (remaining > 0) {
+                                size_t chunk = MIN(remaining, sizeof(discard));
+                                ret = mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                if (ret < 0) {
+                                    LOG_ERR("Failed to discard remaining data: %d", ret);
+                                    break;
+                                } else if (ret == 0) {
+                                    LOG_ERR("Unexpected 0 bytes when discarding");
+                                    break;
+                                }
+                                remaining -= ret;  /* Use ACTUAL bytes read, not requested */
+                            }
+                        } else if (ret != json_read) {
+                            LOG_WRN("Partial initial read: got %d bytes, expected %zu", ret, json_read);
+                            json_read = ret;  /* Update to actual bytes read */
+                        }
+                        
+                        if (ret >= 0) {
                                 /* Skip 4-byte hex length header */
                                 int json_start = 4;
                                 
@@ -545,7 +599,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                     escape_next = false;
                                 }
                             
-                            if (json_end >= 0) {
+                            if (json_end >= 0 && json_end < (int)json_read - 1) {
                                 /* Parse JSON header */
                                 json_buf[json_end + 1] = '\0';
                                 
@@ -579,14 +633,73 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                             snprintf(filepath, sizeof(filepath), "/lfs/temp_%s", filename->valuestring);
                                         }
                                     
+                                    /* For temporary files, try to clean up old ones first */
+                                    if (!is_permanent) {
+                                        struct fs_dir_t dir;
+                                        fs_dir_t_init(&dir);
+                                        if (fs_opendir(&dir, "/lfs") == 0) {
+                                            struct fs_dirent entry;
+                                            int old_files_deleted = 0;
+                                            while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != '\0') {
+                                                if (strncmp(entry.name, "temp_", 5) == 0) {
+                                                    char old_file[128];
+                                                    snprintf(old_file, sizeof(old_file), "/lfs/%s", entry.name);
+                                                    if (fs_unlink(old_file) == 0) {
+                                                        old_files_deleted++;
+                                                    }
+                                                }
+                                            }
+                                            fs_closedir(&dir);
+                                            if (old_files_deleted > 0) {
+                                                LOG_INF("Cleaned up %d old temporary files", old_files_deleted);
+                                            }
+                                        }
+                                    }
+                                    
+                                    /* Check filesystem status before writing */
+                                    struct fs_statvfs stats;
+                                    if (fs_statvfs("/lfs", &stats) == 0) {
+                                        /* Use f_frsize (fragment size) not f_bsize for space calculation */
+                                        unsigned long free_kb = (stats.f_frsize * stats.f_bfree) / 1024;
+                                        unsigned long total_kb = (stats.f_frsize * stats.f_blocks) / 1024;
+                                        LOG_INF("Filesystem: %lu KB free of %lu KB total", free_kb, total_kb);
+                                        
+                                        if (free_kb < 100) {
+                                            LOG_WRN("Low filesystem space! Only %lu KB free", free_kb);
+                                        }
+                                    }
+                                    
                                     ret = fs_open(&file, filepath, FS_O_CREATE | FS_O_WRITE);
                                     if (ret == 0) {
                                         LOG_INF("Writing audio to %s file: %s", 
                                                 is_permanent ? "permanent" : "temporary", filepath);
                                         
                                         /* Calculate how much audio data is in the first chunk */
-                                        size_t header_total_size = json_end + 1;  /* Total header size including 4-byte prefix */
-                                        size_t audio_in_first = json_read - header_total_size;
+                                        /* IMPORTANT: json_end is the position of the null terminator in the JSON.
+                                         * The actual header includes: 4-byte prefix + JSON + null terminator
+                                         * So header_total_size = json_end + 1 (for null) */
+                                        
+                                        /* CRITICAL: Ensure json_end is valid before using it */
+                                        if (json_end < 0) {
+                                            LOG_ERR("CRITICAL ERROR: json_end is %d (negative!), cannot calculate header size", json_end);
+                                            fs_close(&file);
+                                            break;
+                                        }
+                                        
+                                        size_t header_total_size = (size_t)(json_end + 1);  /* Total header size including 4-byte prefix */
+                                        size_t audio_in_first = 0;
+                                        
+                                        LOG_INF("Header calculation: json_read=%zu, json_end=%d, header_total_size=%zu", 
+                                                json_read, json_end, header_total_size);
+                                        
+                                        /* Safety check to prevent underflow */
+                                        if (json_read >= header_total_size) {
+                                            audio_in_first = json_read - header_total_size;
+                                        } else {
+                                            LOG_WRN("json_read (%zu) < header_total_size (%zu), no audio in first chunk", 
+                                                    json_read, header_total_size);
+                                        }
+                                        
                                         if (audio_in_first > 0) {
                                             LOG_INF("Writing first chunk: %zu bytes (header was %zu bytes)", 
                                                     audio_in_first, header_total_size);
@@ -595,7 +708,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                                 LOG_ERR("Failed to write first chunk: %d", ret);
                                                 fs_close(&file);
                                                 /* Consume rest of payload */
-                                                size_t remaining = total_len - json_read;
+                                                size_t remaining = (total_len > json_read) ? (total_len - json_read) : 0;
                                                 uint8_t discard[512];
                                                 while (remaining > 0) {
                                                     size_t chunk = MIN(remaining, sizeof(discard));
@@ -608,20 +721,49 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                         
                                         /* Read and write remaining data in chunks */
                                         size_t bytes_written = audio_in_first;
-                                        size_t remaining = total_len - json_read;
-                                        uint8_t chunk_buf[256];  /* Smaller chunks for better responsiveness */
+                                        
+                                        /* Calculate remaining bytes safely */
+                                        size_t remaining = 0;
+                                        if (total_len > json_read) {
+                                            remaining = total_len - json_read;
+                                        } else {
+                                            LOG_ERR("ERROR: total_len (%zu) <= json_read (%zu), this should not happen!", 
+                                                    total_len, json_read);
+                                        }
+                                        
+                                        LOG_INF("MQTT tracking: total_len=%zu, json_read=%zu, remaining=%zu", 
+                                                total_len, json_read, remaining);
+                                        
+                                        /* Use 512-byte chunks to reduce stack usage in deeply nested handler */
+                                        uint8_t chunk_buf[512];  /* Reduced to prevent stack exhaustion */
                                         
                                         LOG_INF("Starting to write remaining %zu bytes (total payload: %zu, already read: %zu)", 
                                                 remaining, total_len, json_read);
-                                        LOG_INF("Audio data: first chunk %zu bytes, expecting %zu more bytes", 
-                                                audio_in_first, remaining);
+                                        LOG_INF("Audio data: first chunk %zu bytes (actual value: 0x%zx), expecting %zu more bytes", 
+                                                audio_in_first, audio_in_first, remaining);
+                                        
+                                        /* Extra safety check */
+                                        if (audio_in_first > total_len || remaining > total_len) {
+                                            LOG_ERR("CRITICAL: Integer underflow detected! audio_in_first=%zu (0x%zx), remaining=%zu (0x%zx)", 
+                                                    audio_in_first, audio_in_first, remaining, remaining);
+                                            fs_close(&file);
+                                            break;
+                                        }
+                                        
+                                        /* Give system time to settle before intensive file operations */
+                                        k_sleep(K_MSEC(50));
+                                        LOG_DBG("Starting file write loop");
                                         
                                         int loop_count = 0;
                                         while (remaining > 0) {
                                             size_t chunk_size = MIN(remaining, sizeof(chunk_buf));
                                             
-                                            LOG_DBG("Reading chunk %d: %zu bytes (remaining: %zu)", 
-                                                    loop_count++, chunk_size, remaining);
+                                            /* Reduce logging frequency to prevent buffer overflow */
+                                            if (loop_count % 10 == 0) {
+                                                LOG_INF("Reading chunk %d: %zu bytes (remaining: %zu)", 
+                                                        loop_count, chunk_size, remaining);
+                                            }
+                                            loop_count++;
                                             
                                             /* Add timeout detection */
                                             uint32_t start_time = k_uptime_get_32();
@@ -638,40 +780,93 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                             } else if (ret == 0) {
                                                 LOG_ERR("Read returned 0 bytes, expected %zu", chunk_size);
                                                 break;
+                                            } else if (ret != chunk_size) {
+                                                /* This is normal - we might get less than requested */
+                                                LOG_DBG("Partial read: got %d bytes, requested %zu", ret, chunk_size);
                                             }
                                             
-                                            LOG_DBG("Read %d bytes, writing to file...", ret);
+                                            /* Only log every 10th write to reduce log spam */
+                                            if ((loop_count - 1) % 10 == 0) {
+                                                LOG_DBG("Read %d bytes, writing to file...", ret);
+                                            }
                                             
+                                            /* Add timing to detect fs_write hangs */
+                                            int64_t write_start = k_uptime_get();
                                             int write_ret = fs_write(&file, chunk_buf, ret);
+                                            int64_t write_time = k_uptime_get() - write_start;
+                                            
                                             if (write_ret < 0) {
                                                 LOG_ERR("Failed to write chunk: %d", write_ret);
                                                 break;
                                             }
                                             
-                                            bytes_written += ret;
-                                            remaining -= ret;
+                                            if (write_time > 100) {
+                                                LOG_WRN("Slow fs_write: %lld ms for %d bytes", write_time, ret);
+                                            }
+                                            
+                                            bytes_written += ret;  /* Track bytes consumed from MQTT */
+                                            remaining -= ret;      /* Track bytes still to read from MQTT */
                                             
                                             /* Yield more frequently to prevent blocking */
                                             k_yield();
                                             
-                                            /* Progress log every 4KB for debugging */
+                                            /* More aggressive yielding when filesystem is slow */
+                                            if (write_time > 50) {
+                                                LOG_DBG("Yielding after slow write");
+                                                k_sleep(K_MSEC(5));  /* Extra yield for slow writes */
+                                            }
+                                            
+                                            /* Progress update every 4KB for more frequent breathing room */
                                             if (bytes_written % 4096 == 0) {
-                                                LOG_INF("Progress: %zu/%zu bytes written", bytes_written, total_len);
+                                                int percent = (bytes_written * 100) / total_len;
+                                                LOG_INF("Progress: %d%% (%zu/%zu bytes)", percent, bytes_written, total_len);
+                                                k_sleep(K_MSEC(20));  /* Give filesystem more time for housekeeping */
                                             }
                                         }
                                         
                                         LOG_INF("Loop complete - bytes_written: %zu, remaining: %zu", 
                                                 bytes_written, remaining);
                                         
-                                        if (remaining == 0) {
-                                            LOG_INF("All data read successfully, syncing file...");
-                                        } else {
-                                            LOG_ERR("Loop exited with %zu bytes remaining!", remaining);
+                                        /* Verify we've consumed exactly the expected amount */
+                                        size_t total_consumed = json_read + bytes_written;
+                                        if (total_consumed != total_len) {
+                                            LOG_ERR("CRITICAL: Data mismatch! Expected %zu bytes, consumed %zu (json:%zu + file:%zu)",
+                                                    total_len, total_consumed, json_read, bytes_written);
+                                            
+                                            /* Try to consume any missing bytes to fix MQTT state */
+                                            if (total_consumed < total_len) {
+                                                size_t missing = total_len - total_consumed;
+                                                LOG_ERR("Attempting to consume %zu missing bytes", missing);
+                                                uint8_t discard[512];
+                                                while (missing > 0) {
+                                                    size_t chunk = MIN(missing, sizeof(discard));
+                                                    int ret = mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                                    if (ret <= 0) {
+                                                        LOG_ERR("Failed to consume missing bytes: %d", ret);
+                                                        break;
+                                                    }
+                                                    missing -= ret;
+                                                }
+                                            }
                                         }
                                         
-                                        /* Sync file to ensure data is written */
-                                        fs_sync(&file);
-                                        LOG_INF("Closing file...");
+                                        if (remaining == 0) {
+                                            LOG_INF("All data read successfully, closing file...");
+                                        } else {
+                                            LOG_ERR("Loop exited with %zu bytes remaining!", remaining);
+                                            /* Consume any remaining data to keep MQTT in sync */
+                                            uint8_t discard[512];
+                                            while (remaining > 0) {
+                                                size_t chunk = MIN(remaining, sizeof(discard));
+                                                int ret = mqtt_read_publish_payload_blocking(client, discard, chunk);
+                                                if (ret <= 0) break;
+                                                remaining -= ret;
+                                            }
+                                        }
+                                        
+                                        /* Skip explicit sync - fs_close should handle it */
+                                        /* fs_sync(&file); */
+                                        LOG_INF("Closing file (with implicit sync)...");
                                         fs_close(&file);
                                         LOG_INF("Audio file written: %zu bytes", bytes_written);
                                         
@@ -679,8 +874,15 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                         if (handler) {
                                             /* Create a minimal message with file reference */
                                             char msg_buf[256];
-                                            int msg_len = snprintf(msg_buf, sizeof(msg_buf),
-                                                "\x00\x01{\"file\":\"%s\"}", filepath);
+                                            /* Cannot use snprintf with \x00 null byte - build manually */
+                                            msg_buf[0] = 0x00;  /* Audio type prefix byte 1 */
+                                            msg_buf[1] = 0x01;  /* Audio type prefix byte 2 */
+                                            int json_len = snprintf(&msg_buf[2], sizeof(msg_buf) - 2,
+                                                "{\"file\":\"%s\"}", filepath);
+                                            int msg_len = json_len + 2;  /* Add the 2 prefix bytes */
+                                            
+                                            LOG_DBG("Queueing playback message: json_len=%d, msg_len=%d, file=%s", 
+                                                    json_len, msg_len, filepath);
                                             
                                             struct mqtt_msg_work *work = k_malloc(sizeof(*work));
                                             if (work) {
@@ -692,15 +894,19 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                                     memcpy(work->payload, msg_buf, msg_len);
                                                     work->payload_len = msg_len;
                                                     k_work_submit(&work->work);
+                                                    LOG_INF("Audio file queued for playback: %s", filepath);
                                                 } else {
+                                                    LOG_ERR("Failed to allocate payload for playback message");
                                                     k_free(work);
                                                 }
+                                            } else {
+                                                LOG_ERR("Failed to allocate work item for playback");
                                             }
                                         }
                                     } else {
                                         LOG_ERR("Failed to open file %s: %d", filepath, ret);
                                         /* Consume remaining data */
-                                        size_t remaining = total_len - json_read;
+                                        size_t remaining = (total_len > json_read) ? (total_len - json_read) : 0;
                                         uint8_t discard[512];
                                         while (remaining > 0) {
                                             size_t chunk = MIN(remaining, sizeof(discard));
@@ -711,7 +917,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                     } else {
                                         /* Not for file or parse failed - consume data */
                                         LOG_WRN("Audio message not for file storage or missing filename");
-                                        size_t remaining = total_len - json_read;
+                                        size_t remaining = (total_len > json_read) ? (total_len - json_read) : 0;
                                         uint8_t discard[512];
                                         while (remaining > 0) {
                                             size_t chunk = MIN(remaining, sizeof(discard));
@@ -743,6 +949,10 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                 }
                             }
                         }
+                        
+                        /* Log final status for debugging phantom message issues */
+                        LOG_INF("Audio message processing complete: msg_id=%u, advertised_len=%u",
+                                pub->message_id, pub->message.payload.len);
                     } else {
                         /* Non-audio large message - just consume it */
                         LOG_WRN("Large non-audio message (%u bytes) - discarding", 
@@ -757,12 +967,19 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                     }
                 }
             }
+            
+            /* CRITICAL: Ensure we don't leave MQTT client in a bad state */
+            LOG_INF("MQTT_EVT_PUBLISH complete: msg_id=%u, advertised_len=%u, topic=%.*s", 
+                    pub->message_id, pub->message.payload.len,
+                    pub->message.topic.topic.size, pub->message.topic.topic.utf8);
         }
         break;
         
     default:
         break;
     }
+    
+    LOG_DBG("mqtt_evt_handler returning for event type %d", evt->type);
 }
 
 /**

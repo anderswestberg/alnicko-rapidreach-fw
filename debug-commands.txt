@@ -1,0 +1,23 @@
+# Debug Commands for Embedded Device
+
+## Check if device rebooted:
+kernel uptime
+
+## Check recent logs:
+log backend uart
+
+## Check filesystem status:
+fs ls /lfs
+
+## Check memory/heap status:
+kernel stacks
+free
+
+## Check MQTT connection status:
+mqtt_info
+
+## If using Zephyr shell, check threads:
+kernel threads
+
+## Check for any crash dumps:
+coredump info

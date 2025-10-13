@@ -390,8 +390,11 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
             }
             
             /* Calculate audio data position and size */
-            size_t audio_in_buf = json_read - json_end;
-            size_t audio_remaining = total_len - json_end;
+            size_t audio_in_buf = 0;
+            if (json_read > json_end) {
+                audio_in_buf = json_read - json_end;
+            }
+            size_t audio_remaining = (total_len > json_end) ? (total_len - json_end) : 0;
             
             /* Open file for writing */
             ret = fs_open(&file, audio_file, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
@@ -436,7 +439,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
              * This means MQTT packets (including keepalives) cannot be processed
              * during the ~1.3 second file write operation. The 60-second keepalive
              * timeout should be sufficient to handle this delay. */
-            uint8_t chunk_buf[512];  /* Larger chunks for better throughput */
+            uint8_t chunk_buf[1024];  /* Safe with increased network RX stack (4KB) */
             int64_t start_time = k_uptime_get();
             LOG_INF("Starting file write at time: %lld", start_time);
             
@@ -469,8 +472,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 /* Skip progress logging to reduce spam */
             }
             
-            /* Sync file to ensure data is written to flash */
-            fs_sync(&file);
+            /* Skip explicit sync - fs_close should handle it */
+            /* fs_sync(&file); */
             fs_close(&file);
             int64_t end_time = k_uptime_get();
             LOG_INF("Audio saved to %s (%zu bytes) at time: %lld (duration: %lld ms)", 
