@@ -26,6 +26,7 @@
 #include <zephyr/fs/fs.h>
 #include "mqtt_message_parser.h"
 #include "cJSON.h"
+#include "mqtt_audio_queue.h"
 
 LOG_MODULE_REGISTER(mqtt_wrapper, LOG_LEVEL_DBG);
 
@@ -870,38 +871,51 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                         fs_close(&file);
                                         LOG_INF("Audio file written: %zu bytes", bytes_written);
                                         
-                                        /* Queue for playback if handler exists */
-                                        if (handler) {
-                                            /* Create a minimal message with file reference */
-                                            char msg_buf[256];
-                                            /* Cannot use snprintf with \x00 null byte - build manually */
-                                            msg_buf[0] = 0x00;  /* Audio type prefix byte 1 */
-                                            msg_buf[1] = 0x01;  /* Audio type prefix byte 2 */
-                                            int json_len = snprintf(&msg_buf[2], sizeof(msg_buf) - 2,
-                                                "{\"file\":\"%s\"}", filepath);
-                                            int msg_len = json_len + 2;  /* Add the 2 prefix bytes */
-                                            
-                                            LOG_DBG("Queueing playback message: json_len=%d, msg_len=%d, file=%s", 
-                                                    json_len, msg_len, filepath);
-                                            
-                                            struct mqtt_msg_work *work = k_malloc(sizeof(*work));
-                                            if (work) {
-                                                strncpy(work->topic, topic, sizeof(work->topic) - 1);
-                                                work->callback = handler;
-                                                work->user_data = user_data;
-                                                work->payload = k_malloc(msg_len);
-                                                if (work->payload) {
-                                                    memcpy(work->payload, msg_buf, msg_len);
-                                                    work->payload_len = msg_len;
-                                                    k_work_submit(&work->work);
-                                                    LOG_INF("Audio file queued for playback: %s", filepath);
-                                                } else {
-                                                    LOG_ERR("Failed to allocate payload for playback message");
-                                                    k_free(work);
-                                                }
-                                            } else {
-                                                LOG_ERR("Failed to allocate work item for playback");
-                                            }
+                                        /* Queue audio file directly for playback */
+                                        struct audio_queue_item audio_item = {
+                                            .volume = 100,        /* Default volume */
+                                            .priority = 1,        /* Default priority */
+                                            .play_count = 1,      /* Play once */
+                                            .interrupt_current = false
+                                        };
+                                        
+                                        /* Check if we have volume in JSON metadata */
+                                        cJSON *volume_item = cJSON_GetObjectItem(root, "volume");
+                                        if (volume_item && cJSON_IsNumber(volume_item)) {
+                                            audio_item.volume = (uint8_t)volume_item->valueint;
+                                        }
+                                        
+                                        /* Check if we have priority in JSON metadata */
+                                        cJSON *priority_item = cJSON_GetObjectItem(root, "priority");
+                                        if (priority_item && cJSON_IsNumber(priority_item)) {
+                                            audio_item.priority = (uint8_t)priority_item->valueint;
+                                        }
+                                        
+                                        /* Check if we have playCount in JSON metadata */
+                                        cJSON *play_count_item = cJSON_GetObjectItem(root, "playCount");
+                                        if (play_count_item && cJSON_IsNumber(play_count_item)) {
+                                            audio_item.play_count = (uint8_t)play_count_item->valueint;
+                                        }
+                                        
+                                        /* Check if we have interruptCurrent in JSON metadata */
+                                        cJSON *interrupt_item = cJSON_GetObjectItem(root, "interruptCurrent");
+                                        if (interrupt_item && cJSON_IsBool(interrupt_item)) {
+                                            audio_item.interrupt_current = cJSON_IsTrue(interrupt_item);
+                                        }
+                                        
+                                        /* Copy the filename */
+                                        strncpy(audio_item.filename, filepath, sizeof(audio_item.filename) - 1);
+                                        audio_item.filename[sizeof(audio_item.filename) - 1] = '\0';
+                                        
+                                        LOG_INF("Queueing audio file for playback: %s (vol=%d, pri=%d, count=%d, int=%d)",
+                                                filepath, audio_item.volume, audio_item.priority, 
+                                                audio_item.play_count, audio_item.interrupt_current);
+                                        
+                                        int ret = audio_queue_add(&audio_item);
+                                        if (ret == 0) {
+                                            LOG_INF("Audio file queued successfully: %s", filepath);
+                                        } else {
+                                            LOG_ERR("Failed to queue audio file: %d", ret);
                                         }
                                     } else {
                                         LOG_ERR("Failed to open file %s: %d", filepath, ret);
