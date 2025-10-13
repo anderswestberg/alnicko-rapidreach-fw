@@ -601,14 +601,16 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                 }
                             
                             if (json_end >= 0 && json_end < (int)json_read - 1) {
-                                /* Parse JSON header */
-                                json_buf[json_end + 1] = '\0';
+                                /* Parse JSON header - create a copy to avoid overwriting audio data */
+                                char json_copy[512];
+                                memcpy(json_copy, &json_buf[json_start], json_end - json_start + 1);
+                                json_copy[json_end - json_start + 1] = '\0';
                                 
                                 
                                 /* Parse JSON directly for file-based audio */
                                 LOG_INF("JSON header (%d bytes): %.*s", json_end - json_start + 1, json_end - json_start + 1, &json_buf[json_start]);
                                 
-                                cJSON *root = cJSON_Parse((const char *)&json_buf[json_start]);
+                                cJSON *root = cJSON_Parse((const char *)json_copy);
                                 if (root) {
                                     cJSON *saveToFile = cJSON_GetObjectItem(root, "saveToFile");
                                     cJSON *filename = cJSON_GetObjectItem(root, "filename");
@@ -704,7 +706,15 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                         if (audio_in_first > 0) {
                                             LOG_INF("Writing first chunk: %zu bytes (header was %zu bytes)", 
                                                     audio_in_first, header_total_size);
-                                            ret = fs_write(&file, &json_buf[json_end + 1], audio_in_first);
+                                            
+                                            /* Debug: Check if this looks like Opus data (should start with OggS) */
+                                            if (audio_in_first >= 4) {
+                                                LOG_DBG("First 4 audio bytes: %02x %02x %02x %02x (should be 4F 67 67 53 for OggS)",
+                                                        json_buf[header_total_size], json_buf[header_total_size+1], 
+                                                        json_buf[header_total_size+2], json_buf[header_total_size+3]);
+                                            }
+                                            
+                                            ret = fs_write(&file, &json_buf[header_total_size], audio_in_first);
                                             if (ret < 0) {
                                                 LOG_ERR("Failed to write first chunk: %d", ret);
                                                 fs_close(&file);
@@ -722,6 +732,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                         
                                         /* Read and write remaining data in chunks */
                                         size_t bytes_written = audio_in_first;
+                                        size_t mqtt_bytes_consumed = 0;  /* Track additional bytes consumed from MQTT */
                                         
                                         /* Calculate remaining bytes safely */
                                         size_t remaining = 0;
@@ -740,8 +751,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                         
                                         LOG_INF("Starting to write remaining %zu bytes (total payload: %zu, already read: %zu)", 
                                                 remaining, total_len, json_read);
-                                        LOG_INF("Audio data: first chunk %zu bytes (actual value: 0x%zx), expecting %zu more bytes", 
-                                                audio_in_first, audio_in_first, remaining);
+                                        LOG_INF("Audio data: first chunk has %zu audio bytes, expecting %zu more MQTT bytes", 
+                                                audio_in_first, remaining);
                                         
                                         /* Extra safety check */
                                         if (audio_in_first > total_len || remaining > total_len) {
@@ -805,8 +816,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                                 LOG_WRN("Slow fs_write: %lld ms for %d bytes", write_time, ret);
                                             }
                                             
-                                            bytes_written += ret;  /* Track bytes consumed from MQTT */
-                                            remaining -= ret;      /* Track bytes still to read from MQTT */
+                                            bytes_written += ret;     /* Track bytes written to file */
+                                            mqtt_bytes_consumed += ret;  /* Track bytes consumed from MQTT */
+                                            remaining -= ret;         /* Track bytes still to read from MQTT */
                                             
                                             /* Yield more frequently to prevent blocking */
                                             k_yield();
@@ -825,14 +837,14 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                             }
                                         }
                                         
-                                        LOG_INF("Loop complete - bytes_written: %zu, remaining: %zu", 
-                                                bytes_written, remaining);
+                                        LOG_INF("Loop complete - bytes_written: %zu, mqtt_consumed: %zu, remaining: %zu", 
+                                                bytes_written, mqtt_bytes_consumed, remaining);
                                         
                                         /* Verify we've consumed exactly the expected amount */
-                                        size_t total_consumed = json_read + bytes_written;
+                                        size_t total_consumed = json_read + mqtt_bytes_consumed;
                                         if (total_consumed != total_len) {
-                                            LOG_ERR("CRITICAL: Data mismatch! Expected %zu bytes, consumed %zu (json:%zu + file:%zu)",
-                                                    total_len, total_consumed, json_read, bytes_written);
+                                            LOG_ERR("CRITICAL: Data mismatch! Expected %zu bytes, consumed %zu (json:%zu + mqtt:%zu)",
+                                                    total_len, total_consumed, json_read, mqtt_bytes_consumed);
                                             
                                             /* Try to consume any missing bytes to fix MQTT state */
                                             if (total_consumed < total_len) {
