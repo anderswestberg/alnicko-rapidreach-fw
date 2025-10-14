@@ -68,7 +68,10 @@ export const DeviceTerminal = () => {
       if (preselected) {
         setSelectedDevice(preselected);
         sessionStorage.removeItem('preselectedDevice');
-        setOutput([`Connected to device: ${preselected}`, '']);
+        // Find the device to get its friendly name
+        const device = data.find((d: any) => d.deviceId === preselected);
+        const displayName = device ? (device.clientId || device.deviceId) : preselected;
+        setOutput([`Connected to device: ${displayName}`, '']);
       }
       
       // Focus input after devices load
@@ -96,7 +99,7 @@ export const DeviceTerminal = () => {
     setOutput(prev => [...prev, `$ ${commandToSend}`, '']);
 
     try {
-      // Use the same endpoint as DeviceShow
+      // Use the same endpoint as DeviceShow - selectedDevice is now the deviceId
       const response = await fetch(`${API_URL}/devices/${encodeURIComponent(selectedDevice)}/execute`, {
         method: 'POST',
         headers: {
@@ -191,16 +194,19 @@ export const DeviceTerminal = () => {
                 value={selectedDevice}
                 onChange={(e) => {
                   setSelectedDevice(e.target.value);
-                  setOutput([`Connected to device: ${e.target.value}`, '']);
+                  // Find the device to get its friendly name
+                  const device = devices.find(d => d.deviceId === e.target.value);
+                  const displayName = device ? (device.clientId || device.deviceId) : e.target.value;
+                  setOutput([`Connected to device: ${displayName}`, '']);
                 }}
                 label="Select Device"
               >
                 {devices.map((device) => (
                   <MenuItem 
                     key={device.id} 
-                    value={device.clientId || device.id}
+                    value={device.deviceId}
                   >
-                    {device.clientId || device.id}
+                    {device.clientId || device.deviceId}
                     {' '}
                     <Chip 
                       label={device.status} 
