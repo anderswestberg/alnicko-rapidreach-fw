@@ -57,3 +57,4 @@ rsource "file_manager/Kconfig.file"
 
 rsource "dfu_manager/Kconfig.dfu"
 rsource "rtc/Kconfig.rtc"
+rsource "sntp_sync/Kconfig"

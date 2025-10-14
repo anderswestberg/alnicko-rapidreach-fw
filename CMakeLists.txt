@@ -27,3 +27,8 @@ if(CONFIG_SHELL_BACKEND_MQTT)
     target_link_libraries(app PUBLIC ..__..__src__shell_backend_monitor)
 endif()
 
+# Link SNTP sync module if enabled
+if(CONFIG_RPR_MODULE_SNTP_SYNC)
+    target_link_libraries(app PUBLIC ..__..__src__sntp_sync)
+endif()
+

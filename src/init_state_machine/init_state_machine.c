@@ -27,6 +27,10 @@
 #include "../mqtt_log_client/mqtt_log_client.h"
 #endif
 
+#ifdef CONFIG_RPR_MODULE_SNTP_SYNC
+#include "../sntp_sync/sntp_sync.h"
+#endif
+
 #include "../dev_info/dev_info.h"
 
 LOG_MODULE_REGISTER(init_sm, CONFIG_RPR_MODULE_INIT_SM_LOG_LEVEL);
@@ -377,6 +381,31 @@ static void state_network_ready_entry(init_sm_context_t *ctx, init_event_t event
 static void state_network_stabilize_entry(init_sm_context_t *ctx, init_event_t event)
 {
     LOG_INF("Entering NETWORK_STABILIZE state - waiting 5 seconds for network to stabilize");
+    
+#ifdef CONFIG_RPR_MODULE_SNTP_SYNC
+    /* Initialize and start SNTP time synchronization */
+    int ret = sntp_sync_init();
+    if (ret < 0 && ret != -EALREADY) {
+        LOG_WRN("Failed to initialize SNTP: %d", ret);
+    } else {
+#ifdef CONFIG_RPR_MODULE_SNTP_SYNC_AUTO_START
+        /* Enable periodic SNTP sync */
+        ret = sntp_sync_set_periodic(true, CONFIG_RPR_MODULE_SNTP_SYNC_INTERVAL);
+        if (ret == 0) {
+            LOG_INF("Periodic SNTP sync enabled (interval: %d seconds)", 
+                CONFIG_RPR_MODULE_SNTP_SYNC_INTERVAL);
+        }
+#else
+        /* Just perform one-time sync */
+        ret = sntp_sync_now(5000);
+        if (ret == 0) {
+            LOG_INF("SNTP time synchronized");
+        } else {
+            LOG_WRN("SNTP sync failed: %d", ret);
+        }
+#endif
+    }
+#endif
     
     /* Start a 5 second timeout to let network stabilize */
     k_work_schedule(&ctx->timeout_work, K_SECONDS(5));

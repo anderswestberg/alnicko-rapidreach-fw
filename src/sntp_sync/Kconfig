@@ -1,0 +1,37 @@
+menuconfig RPR_MODULE_SNTP_SYNC
+	bool "SNTP Time Synchronization Module"
+	depends on SNTP && NET_SOCKETS
+	default y
+	help
+	  Enable SNTP (Simple Network Time Protocol) time synchronization.
+	  This module automatically synchronizes system time with NTP servers
+	  and updates the RTC.
+
+if RPR_MODULE_SNTP_SYNC
+
+config RPR_MODULE_SNTP_SYNC_LOG_LEVEL
+	int "Log level for SNTP sync module"
+	default 3
+	range 0 4
+	help
+	  Log level for SNTP synchronization module:
+	  0 = Off, 1 = Error, 2 = Warning, 3 = Info, 4 = Debug
+
+config RPR_MODULE_SNTP_SYNC_AUTO_START
+	bool "Automatically start periodic SNTP sync on network connect"
+	default y
+	help
+	  When enabled, SNTP synchronization will automatically start
+	  when network connectivity is established.
+
+config RPR_MODULE_SNTP_SYNC_INTERVAL
+	int "Periodic sync interval in seconds"
+	default 3600
+	range 60 86400
+	depends on RPR_MODULE_SNTP_SYNC_AUTO_START
+	help
+	  Time interval between automatic SNTP synchronization attempts.
+	  Default is 3600 seconds (1 hour). Minimum is 60 seconds (1 minute).
+
+endif # RPR_MODULE_SNTP_SYNC
+
