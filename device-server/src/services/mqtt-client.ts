@@ -271,6 +271,32 @@ export class DeviceMqttClient extends EventEmitter {
       const now = new Date();
       const text = payload.toString();
       let items: any[] = [];
+      
+      // Helper function to validate and fix timestamps
+      const validateTimestamp = (timestamp: any): Date => {
+        if (!timestamp) return now;
+        
+        if (typeof timestamp === 'number' && timestamp < 1000000000) {
+          // Boot-relative timestamp, use current time
+          return now;
+        }
+        
+        const deviceTime = new Date(timestamp);
+        const timeDiff = deviceTime.getTime() - now.getTime();
+        
+        // If timestamp is more than 1 minute in the future, it's likely clock drift
+        if (timeDiff > 60000) {
+          // Log the issue occasionally (1% chance)
+          if (Math.random() < 0.01) {
+            logger.warn(`Device ${deviceId} clock is ${Math.round(timeDiff/1000)}s ahead`);
+          }
+          // Use current server time instead
+          return now;
+        }
+        
+        return deviceTime;
+      };
+      
       try {
         // Clean control characters from the text before parsing
         // Replace control characters with their escaped versions or remove them
@@ -305,13 +331,7 @@ export class DeviceMqttClient extends EventEmitter {
               level: level,
               levelNo: levelMap[level] || 2, // Default to info (2) if unknown
               message: p.message !== undefined ? p.message : JSON.stringify(p),
-              // Handle timestamp - if it's a number less than 1 billion, assume it's ms since boot
-              // Otherwise it's a Unix timestamp in milliseconds
-              timestamp: p.timestamp 
-                ? (typeof p.timestamp === 'number' && p.timestamp < 1000000000 
-                   ? now  // For boot-relative timestamps, just use current time for now
-                   : new Date(p.timestamp))
-                : now,
+              timestamp: validateTimestamp(p.timestamp),
             };
           });
         } else if (Array.isArray(parsed)) {
@@ -333,7 +353,7 @@ export class DeviceMqttClient extends EventEmitter {
               level: level,
               levelNo: levelMap[level] || 2,
               message: p.message || JSON.stringify(p),
-              timestamp: p.timestamp ? new Date(p.timestamp) : now,
+              timestamp: validateTimestamp(p.timestamp),
               ...p,
             };
           });
@@ -359,7 +379,7 @@ export class DeviceMqttClient extends EventEmitter {
             level: level,
             levelNo: levelMap[level] || 2,
             message: parsed.message || text,
-            timestamp: parsed.timestamp ? new Date(parsed.timestamp) : now,
+            timestamp: validateTimestamp(parsed.timestamp),
             ...parsed,
           }];
         }
