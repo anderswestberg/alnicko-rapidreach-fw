@@ -35,13 +35,13 @@ spec:
         - name: EMQX_DASHBOARD__DEFAULT_USERNAME
           value: "admin"
         - name: EMQX_DASHBOARD__DEFAULT_PASSWORD
-          value: "public"
+          value: "Strix1867"
         - name: EMQX_ALLOW_ANONYMOUS
           value: "false"
         - name: EMQX_AUTH__USER__1__USERNAME
           value: "admin"
         - name: EMQX_AUTH__USER__1__PASSWORD
-          value: "public"
+          value: "Strix1867"
         - name: EMQX_ACL_NOMATCH
           value: "allow"
         - name: EMQX_ACL_FILE_ENABLE

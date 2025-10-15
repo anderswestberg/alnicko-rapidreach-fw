@@ -65,6 +65,10 @@ struct mqtt_client_wrapper {
     uint8_t rx_buffer[CONFIG_MQTT_WRAPPER_RX_BUFFER_SIZE];
     uint8_t tx_buffer[CONFIG_MQTT_WRAPPER_TX_BUFFER_SIZE];
     char client_id[64];
+    char username[64];
+    char password[64];
+    struct mqtt_utf8 user_name_struct;
+    struct mqtt_utf8 password_struct;
     
     /* Protocol thread */
     struct k_thread protocol_thread;
@@ -198,6 +202,18 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     /* Copy client ID */
     strncpy(w->client_id, config->client_id, sizeof(w->client_id) - 1);
     
+    /* Copy authentication credentials if provided */
+    if (config->username) {
+        strncpy(w->username, config->username, sizeof(w->username) - 1);
+    } else {
+        w->username[0] = '\0';
+    }
+    if (config->password) {
+        strncpy(w->password, config->password, sizeof(w->password) - 1);
+    } else {
+        w->password[0] = '\0';
+    }
+    
     /* Store primary broker config */
     strncpy(w->primary_hostname, config->broker_hostname, sizeof(w->primary_hostname) - 1);
     w->primary_port = config->broker_port;
@@ -251,6 +267,22 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     w->client.clean_session = config->clean_session ? 1 : 0;
     w->client.user_data = w;
     
+    /* Configure authentication if provided */
+    if (w->username[0] != '\0') {
+        w->user_name_struct.utf8 = (uint8_t *)w->username;
+        w->user_name_struct.size = strlen(w->username);
+        w->client.user_name = &w->user_name_struct;
+    } else {
+        w->client.user_name = NULL;
+    }
+    if (w->password[0] != '\0') {
+        w->password_struct.utf8 = (uint8_t *)w->password;
+        w->password_struct.size = strlen(w->password);
+        w->client.password = &w->password_struct;
+    } else {
+        w->client.password = NULL;
+    }
+    
     /* Initialize work queue with PER-INSTANCE stack */
     k_work_queue_init(&w->msg_work_queue);
     k_work_queue_start(&w->msg_work_queue,
@@ -271,7 +303,7 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     w->current_broker_attempts = 0;
 #endif
     
-    LOG_INF("MQTT wrapper initialized: %s", w->client_id);
+    LOG_INF("MQTT audio client initialized: %s", w->client_id);
     return (mqtt_handle_t)w;
 }
 
@@ -402,9 +434,25 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                     w->client.clean_session = 1;
                     w->client.user_data = w;
                     
+                    /* Restore authentication credentials */
+                    if (w->username[0] != '\0') {
+                        w->user_name_struct.utf8 = (uint8_t *)w->username;
+                        w->user_name_struct.size = strlen(w->username);
+                        w->client.user_name = &w->user_name_struct;
+                    } else {
+                        w->client.user_name = NULL;
+                    }
+                    if (w->password[0] != '\0') {
+                        w->password_struct.utf8 = (uint8_t *)w->password;
+                        w->password_struct.size = strlen(w->password);
+                        w->client.password = &w->password_struct;
+                    } else {
+                        w->client.password = NULL;
+                    }
+                    
                     if (!w->using_fallback) {
                         /* Switch to fallback broker */
-                        LOG_WRN("MQTT wrapper: Primary broker failed %d times, switching to fallback",
+                        LOG_WRN("MQTT audio client: Primary broker failed %d times, switching to fallback",
                                 w->current_broker_attempts);
                         if (resolve_and_set_broker(w, w->fallback_hostname, w->fallback_port) == 0) {
                             w->using_fallback = true;
@@ -413,7 +461,7 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                         }
                     } else {
                         /* Switch back to primary broker */
-                        LOG_WRN("MQTT wrapper: Fallback broker failed %d times, switching to primary",
+                        LOG_WRN("MQTT audio client: Fallback broker failed %d times, switching to primary",
                                 w->current_broker_attempts);
                         if (resolve_and_set_broker(w, w->primary_hostname, w->primary_port) == 0) {
                             w->using_fallback = false;
@@ -425,7 +473,7 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
 #endif
                 
                 const char *broker_type = w->using_fallback ? "fallback" : "primary";
-                LOG_INF("MQTT wrapper attempting connection to %s broker (attempt %d/%d)...",
+                LOG_INF("MQTT audio client attempting connection to %s broker (attempt %d/%d)...",
                         broker_type, w->current_broker_attempts + 1, CONFIG_RPR_MQTT_PRIMARY_RETRIES);
                 
                 /* Clean up any previous connection state before reconnecting */
@@ -444,7 +492,7 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                 
                 ret = mqtt_connect(&w->client);
                 if (ret < 0) {
-                    LOG_ERR("MQTT wrapper connect failed: %d", ret);
+                    LOG_ERR("MQTT audio client connect failed: %d", ret);
                     k_mutex_lock(&w->state_mutex, K_FOREVER);
                     w->connecting = false;
                     w->current_broker_attempts++;
@@ -455,7 +503,7 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                     );
                     k_mutex_unlock(&w->state_mutex);
                 } else {
-                    LOG_INF("MQTT wrapper connect initiated successfully");
+                    LOG_INF("MQTT audio client connect initiated successfully");
                 }
             }
         }
@@ -494,9 +542,9 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
         if (evt->result == 0) {
 #ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
             const char *broker_type = w->using_fallback ? "fallback" : "primary";
-            LOG_INF("MQTT WRAPPER CONNECTED SUCCESSFULLY to %s broker!", broker_type);
+            LOG_INF("MQTT AUDIO CLIENT CONNECTED to %s broker!", broker_type);
 #else
-            LOG_INF("MQTT WRAPPER CONNECTED SUCCESSFULLY!");
+            LOG_INF("MQTT AUDIO CLIENT CONNECTED!");
 #endif
             k_mutex_lock(&w->state_mutex, K_FOREVER);
             w->connected = true;
@@ -530,7 +578,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                 }
             }
         } else {
-            LOG_ERR("MQTT WRAPPER CONNECTION FAILED: result=%d", evt->result);
+            LOG_ERR("MQTT AUDIO CLIENT CONNECTION FAILED: result=%d", evt->result);
             k_mutex_lock(&w->state_mutex, K_FOREVER);
             w->connecting = false;
             k_mutex_unlock(&w->state_mutex);
@@ -1010,9 +1058,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                             }
                                         }
                                         
-                                        /* Skip explicit sync - fs_close should handle it */
-                                        /* fs_sync(&file); */
-                                        LOG_INF("Closing file (with implicit sync)...");
+                                        /* Close file - fs_close handles sync */
+                                        LOG_INF("Closing file...");
                                         fs_close(&file);
                                         LOG_INF("Audio file written: %zu bytes", bytes_written);
                                         
@@ -1184,7 +1231,7 @@ int mqtt_client_connect(mqtt_handle_t handle,
         w->connecting = false;
         k_mutex_unlock(&w->state_mutex);
     } else {
-        LOG_INF("MQTT wrapper connection initiated, waiting for CONNACK...");
+        LOG_INF("MQTT audio client connection initiated, waiting for CONNACK...");
     }
     
     return ret;

@@ -192,9 +192,9 @@ int mqtt_audio_handler_v2_init(void)
         return ret;
     }
     
-    /* Configure MQTT client with unique ID for wrapper test */
-    char wrapper_client_id[64];
-    snprintf(wrapper_client_id, sizeof(wrapper_client_id), "%s-wrapper", device_id_short);
+    /* Configure MQTT client with unique ID for audio handler */
+    char audio_client_id[64];
+    snprintf(audio_client_id, sizeof(audio_client_id), "%s-audio", device_id_short);
     
     /* Use same broker as main MQTT module if it's connected to fallback */
     /* This avoids wasting time trying unreachable primary when we're on LAN */
@@ -205,17 +205,19 @@ int mqtt_audio_handler_v2_init(void)
     if (mqtt_is_using_fallback()) {
         broker_hostname = CONFIG_RPR_MQTT_FALLBACK_BROKER_HOST;
         broker_port = CONFIG_RPR_MQTT_FALLBACK_BROKER_PORT;
-        LOG_INF("Main MQTT using fallback, wrapper will use fallback too");
+        LOG_INF("Main MQTT using fallback, audio client will use fallback too");
     } else {
         broker_hostname = CONFIG_RPR_MQTT_BROKER_HOST;
         broker_port = CONFIG_RPR_MQTT_BROKER_PORT;
-        LOG_INF("Main MQTT using primary, wrapper will use primary too");
+        LOG_INF("Main MQTT using primary, audio client will use primary too");
     }
     
     struct mqtt_client_config config = {
         .broker_hostname = broker_hostname,
         .broker_port = broker_port,
-        .client_id = wrapper_client_id,
+        .client_id = audio_client_id,
+        .username = CONFIG_RPR_MQTT_USERNAME,
+        .password = CONFIG_RPR_MQTT_PASSWORD,
         .keepalive_interval = CONFIG_RPR_MQTT_KEEPALIVE_SEC,
         .clean_session = true
     };

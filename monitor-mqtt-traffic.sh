@@ -5,7 +5,7 @@
 BROKER="192.168.2.79"
 PORT="1883"
 USERNAME="admin"
-PASSWORD="public"
+PASSWORD="Strix1867"
 TOPIC="${1:-#}"  # Default to all topics (#)
 
 echo "================================================"

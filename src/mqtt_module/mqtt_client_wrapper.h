@@ -46,6 +46,8 @@ struct mqtt_client_config {
     const char *broker_hostname;
     uint16_t broker_port;
     const char *client_id;
+    const char *username;        /* MQTT username (optional) */
+    const char *password;        /* MQTT password (optional) */
     uint16_t keepalive_interval;
     bool clean_session;
     /* TLS config can be added here */
