@@ -562,38 +562,56 @@ static bool audio_player_stream_and_decoder_init(ogg_sync_state   *oy,
                                                  ogg_page         *og,
                                                  ogg_packet       *op)
 {
+    printk("\n=== DECODER INIT START ===\n");
+    
     int stream = ogg_stream_init(os, ogg_page_serialno(og));
+    printk("Stream init result: %d\n", stream);
     if (!stream)
         audio_player_cfg.is_stream_init = true;
     else {
+        printk("FAILED: stream init\n");
         LOG_ERR("Failed stream init - %d", stream);
         return false;
     }
 
     ogg_stream_pagein(os, og);
 
-    if (ogg_stream_packetout(os, op) != 1) {
+    int packet_result = ogg_stream_packetout(os, op);
+    printk("Packet out result: %d\n", packet_result);
+    if (packet_result != 1) {
+        printk("FAILED: packet out\n");
         LOG_ERR("Invalid Opus header packet");
         return false;
     }
 
     OpusHeader header;
-    if (opus_header_parse(op->packet, op->bytes, &header) == 0) {
+    int parse_result = opus_header_parse(op->packet, op->bytes, &header);
+    printk("Header parse result: %d, sample_rate=%d, channels=%d\n", 
+           parse_result, header.input_sample_rate, header.channels);
+    if (parse_result == 0) {
+        printk("FAILED: header parse\n");
         LOG_ERR("Cannot parse Opus header");
         return false;
     }
 
+    printk("SUCCESS: Header parsed OK\n");
+    LOG_INF("Decoder init: checking if already configured...");
     if (DEC_Opus_IsConfigured()) {
-        LOG_ERR("Opus decoder is already configured");
-        return false;
+        LOG_ERR("Opus decoder is already configured - deinitializing first");
+        DEC_Opus_Deinit();
     }
-    LOG_DBG("Sample_freq: %d, channel: %d",
+    
+    LOG_INF("Opus header: sample_rate=%d, channels=%d",
             header.input_sample_rate,
             header.channels);
 
-    DecConfigOpus.sample_freq = SAMPLE_FREQUENCY;
-    DecConfigOpus.channels    = MONO_CHANNELS;
-    DecConfigOpus.ms_frame    = DECODER_MS_FRAME;
+    /* REVERT: Use hardcoded values that were working before */
+    DecConfigOpus.sample_freq = SAMPLE_FREQUENCY;  /* 48000 Hz */
+    DecConfigOpus.channels    = MONO_CHANNELS;     /* 1 */
+    DecConfigOpus.ms_frame    = DECODER_MS_FRAME;  /* 20 */
+    
+    LOG_INF("Configuring Opus decoder (HARDCODED): %u Hz, %u channels",
+            DecConfigOpus.sample_freq, DecConfigOpus.channels);
 
     uint32_t dec_size = DEC_Opus_getMemorySize(&DecConfigOpus);
 

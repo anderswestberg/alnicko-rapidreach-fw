@@ -96,6 +96,39 @@ static int reconnect_attempts = 0;
 static bool using_fallback_broker = false;
 static int current_broker_attempts = 0;
 static int total_reconnect_cycles = 0;   /* Track total cycles for logging */
+
+/**
+ * @brief Detect if we're on the office LAN (192.168.2.x network)
+ * @return true if on office LAN, false otherwise
+ */
+static bool is_on_office_lan(void)
+{
+    struct net_if *iface = net_if_get_default();
+    if (!iface) {
+        return false;
+    }
+    
+    /* Check if we have an IPv4 address in 192.168.2.x range */
+    struct net_if_ipv4 *ipv4 = iface->config.ip.ipv4;
+    if (!ipv4) {
+        return false;
+    }
+    
+    /* Get our IP address */
+    struct in_addr *addr = &ipv4->unicast[0].ipv4.address.in_addr;
+    if (!addr) {
+        return false;
+    }
+    
+    /* Check if IP is in 192.168.2.x range (192.168.2.0/24) */
+    uint8_t *ip_bytes = (uint8_t *)addr;
+    if (ip_bytes[0] == 192 && ip_bytes[1] == 168 && ip_bytes[2] == 2) {
+        LOG_INF("Detected office LAN: IP is 192.168.2.%d", ip_bytes[3]);
+        return true;
+    }
+    
+    return false;
+}
 #endif
 
 /* Event handler callback */
@@ -1106,6 +1139,17 @@ int mqtt_init(void)
     }
 
     LOG_INF("Initializing MQTT module...");
+
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+    /* Smart broker selection: detect if we're on office LAN */
+    if (is_on_office_lan()) {
+        LOG_INF("Office LAN detected - starting with local broker for faster connection");
+        using_fallback_broker = true;
+    } else {
+        LOG_INF("Not on office LAN - starting with public broker");
+        using_fallback_broker = false;
+    }
+#endif
 
     /* Prepare MQTT client */
     ret = prepare_mqtt_client();
