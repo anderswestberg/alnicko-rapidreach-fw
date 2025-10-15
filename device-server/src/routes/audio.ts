@@ -144,9 +144,9 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       const lengthBuffer = Buffer.from(lengthHeader, 'ascii');
       const mqttPayload = Buffer.concat([lengthBuffer, jsonBuffer, opusData]);
 
-      const hwId = device.metadata?.hwId;
-      const audioDeviceId = hwId || deviceId;
-      const topic = `rapidreach/audio/${audioDeviceId}`;
+      // Use deviceId (short ID like "373334") for audio topic
+      // Device firmware subscribes using short ID extracted from hardware ID
+      const topic = `rapidreach/audio/${deviceId}`;
       
       await mqttClient.publish(topic, mqttPayload);
       
@@ -189,9 +189,9 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       }
 
       // Use hardware ID for topic if available
-      const hwId = device.metadata?.hwId;
-      const audioDeviceId = hwId || deviceId;
-      const topic = `rapidreach/audio/${audioDeviceId}`;
+      // Use deviceId (short ID like "373334") for audio topic
+      // Device firmware subscribes using short ID extracted from hardware ID
+      const topic = `rapidreach/audio/${deviceId}`;
       
       // Send tiny test message: [4-byte len][JSON]
       const testJson = JSON.stringify({ test: 'ping', timestamp: Date.now() });
@@ -303,9 +303,9 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       // -compression_level 10: Best compression
       // -application voip: Optimize for speech (use 'audio' for music)
       // -ac 1: Convert to mono (saves bandwidth)
-      // -ar 16000: Sample rate (16kHz is good for speech, use 48000 for music)
+      // -ar 48000: Sample rate MUST be 48kHz to match device decoder (CONFIG_RPR_SAMPLE_FREQ=48000)
       // Convert to Opus format - OGG container
-      const ffmpegCommand = `ffmpeg -i "${req.file.path}" -c:a libopus -b:a 32k -vbr on -compression_level 10 -application voip -ac 1 -ar 16000 -f opus "${outputPath}" -y`;
+      const ffmpegCommand = `ffmpeg -i "${req.file.path}" -c:a libopus -b:a 32k -vbr on -compression_level 10 -application voip -ac 1 -ar 48000 -f opus "${outputPath}" -y`;
 
       logger.debug(`Executing: ${ffmpegCommand}`);
 
@@ -355,10 +355,10 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       // Combine: [4-byte length][JSON header][Opus data]
       const mqttPayload = Buffer.concat([lengthBuffer, jsonBuffer, opusData]);
 
-      // Use hardware ID for audio topic if available, fallback to deviceId
-      const hwId = device.metadata?.hwId;
-      const audioDeviceId = hwId || deviceId;
-      const topic = `rapidreach/audio/${audioDeviceId}`;
+      // Use deviceId (short ID like "373334") for audio topic
+      // Device firmware subscribes using short ID extracted from hardware ID
+      const hwId = device.metadata?.hwId;  // For logging only
+      const topic = `rapidreach/audio/${deviceId}`;
       
       logger.info(`Publishing audio alert to ${topic}`, {
         deviceId,
@@ -529,9 +529,9 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       const mqttPayload = Buffer.concat([lengthBuffer, jsonBuffer, opusData]);
 
       // Use hardware ID for audio topic if available, fallback to deviceId
-      const hwId = device.metadata?.hwId;
-      const audioDeviceId = hwId || deviceId;
-      const topic = `rapidreach/audio/${audioDeviceId}`;
+      // Use deviceId (short ID like "373334") for audio topic
+      // Device firmware subscribes using short ID extracted from hardware ID
+      const topic = `rapidreach/audio/${deviceId}`;
       await mqttClient.publish(topic, mqttPayload);
 
       return res.json({

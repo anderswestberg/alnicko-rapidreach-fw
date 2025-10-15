@@ -113,27 +113,9 @@ static void mqtt_audio_alert_handler_v2(const char *topic,
             }
             
             /* Verify file was written */
-            int exists = file_manager_exists(temp_filename);
-            printk("FILE_EXISTS: %d\n", exists);
-            
-            /* Also copy to /lfs/audio/mqtt_test.opus for CLI testing */
-            if (exists > 0) {
-                struct fs_file_t src, dst;
-                uint8_t buf[512];
-                fs_file_t_init(&src);
-                fs_file_t_init(&dst);
-                
-                if (fs_open(&src, temp_filename, FS_O_READ) == 0) {
-                    if (fs_open(&dst, "/lfs/audio/mqtt_test.opus", FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC) == 0) {
-                        ssize_t bytes;
-                        while ((bytes = fs_read(&src, buf, sizeof(buf))) > 0) {
-                            fs_write(&dst, buf, bytes);
-                        }
-                        fs_close(&dst);
-                        printk("COPIED to /lfs/audio/mqtt_test.opus\n");
-                    }
-                    fs_close(&src);
-                }
+            if (!file_manager_exists(temp_filename)) {
+                LOG_ERR("Failed to write audio file: %s", temp_filename);
+                return;
             }
         }
     }
@@ -176,15 +158,25 @@ int mqtt_audio_handler_v2_init(void)
 {
     int ret;
     size_t device_id_len;
-    const char *device_id = dev_info_get_device_id_str(&device_id_len);
-    if (!device_id || device_id_len == 0) {
+    const char *device_id_full = dev_info_get_device_id_str(&device_id_len);
+    if (!device_id_full || device_id_len == 0) {
         LOG_ERR("Failed to get device ID");
         return -EINVAL;
     }
     
-    /* Build topic */
+    /* Extract short device ID (first 6 chars) to match server expectations */
+    char device_id_short[7];
+    if (device_id_len >= 6) {
+        strncpy(device_id_short, device_id_full, 6);
+        device_id_short[6] = '\0';
+    } else {
+        strncpy(device_id_short, device_id_full, device_id_len);
+        device_id_short[device_id_len] = '\0';
+    }
+    
+    /* Build topic using short device ID */
     snprintf(audio_alert_topic, sizeof(audio_alert_topic),
-             "rapidreach/audio/%s", device_id);
+             "rapidreach/audio/%s", device_id_short);
     
     LOG_INF("Initializing MQTT audio handler v2");
     printk("INIT1\n");
@@ -202,11 +194,27 @@ int mqtt_audio_handler_v2_init(void)
     
     /* Configure MQTT client with unique ID for wrapper test */
     char wrapper_client_id[64];
-    snprintf(wrapper_client_id, sizeof(wrapper_client_id), "%s-wrapper", device_id);
+    snprintf(wrapper_client_id, sizeof(wrapper_client_id), "%s-wrapper", device_id_short);
+    
+    /* Use same broker as main MQTT module if it's connected to fallback */
+    /* This avoids wasting time trying unreachable primary when we're on LAN */
+    extern bool mqtt_is_using_fallback(void);
+    const char *broker_hostname;
+    uint16_t broker_port;
+    
+    if (mqtt_is_using_fallback()) {
+        broker_hostname = CONFIG_RPR_MQTT_FALLBACK_BROKER_HOST;
+        broker_port = CONFIG_RPR_MQTT_FALLBACK_BROKER_PORT;
+        LOG_INF("Main MQTT using fallback, wrapper will use fallback too");
+    } else {
+        broker_hostname = CONFIG_RPR_MQTT_BROKER_HOST;
+        broker_port = CONFIG_RPR_MQTT_BROKER_PORT;
+        LOG_INF("Main MQTT using primary, wrapper will use primary too");
+    }
     
     struct mqtt_client_config config = {
-        .broker_hostname = CONFIG_RPR_MQTT_BROKER_HOST,
-        .broker_port = CONFIG_RPR_MQTT_BROKER_PORT,
+        .broker_hostname = broker_hostname,
+        .broker_port = broker_port,
         .client_id = wrapper_client_id,
         .keepalive_interval = CONFIG_RPR_MQTT_KEEPALIVE_SEC,
         .clean_session = true

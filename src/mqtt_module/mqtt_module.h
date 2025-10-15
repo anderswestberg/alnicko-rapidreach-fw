@@ -82,6 +82,20 @@ mqtt_status_t mqtt_send_heartbeat(void);
 bool mqtt_is_connected(void);
 
 /**
+ * @brief Check if MQTT is using fallback broker
+ * 
+ * @return true if using fallback, false if using primary
+ */
+bool mqtt_is_using_fallback(void);
+
+/**
+ * @brief Get the current broker hostname
+ * 
+ * @return Pointer to broker hostname string
+ */
+const char* mqtt_get_current_broker(void);
+
+/**
  * @brief Start the periodic heartbeat task
  * 
  * @return mqtt_status_t MQTT_SUCCESS on success, error code otherwise

@@ -1299,6 +1299,25 @@ bool mqtt_is_connected(void)
     return mqtt_connected;
 }
 
+bool mqtt_is_using_fallback(void)
+{
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+    return using_fallback_broker;
+#else
+    return false;
+#endif
+}
+
+const char* mqtt_get_current_broker(void)
+{
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+    if (using_fallback_broker) {
+        return CONFIG_RPR_MQTT_FALLBACK_BROKER_HOST;
+    }
+#endif
+    return CONFIG_RPR_MQTT_BROKER_HOST;
+}
+
 mqtt_status_t mqtt_start_heartbeat(void)
 {
     if (!mqtt_initialized) {

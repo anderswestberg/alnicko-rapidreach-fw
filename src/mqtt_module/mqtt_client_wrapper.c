@@ -376,6 +376,32 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
 #ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
                 /* Check if we should switch brokers after failed attempts */
                 if (w->current_broker_attempts >= CONFIG_RPR_MQTT_PRIMARY_RETRIES) {
+                    /* Clean up old socket before switching brokers */
+                    if (w->client.transport.tcp.sock >= 0) {
+                        LOG_INF("Cleaning up socket before broker switch");
+                        mqtt_disconnect(&w->client);
+                        k_sleep(K_MSEC(100));
+                        if (w->client.transport.tcp.sock >= 0) {
+                            zsock_close(w->client.transport.tcp.sock);
+                            w->client.transport.tcp.sock = -1;
+                        }
+                    }
+                    
+                    /* Reinitialize client structure for clean state */
+                    mqtt_client_init(&w->client);
+                    w->client.broker = &w->broker;
+                    w->client.evt_cb = mqtt_evt_handler;
+                    w->client.client_id.utf8 = (uint8_t *)w->client_id;
+                    w->client.client_id.size = strlen(w->client_id);
+                    w->client.protocol_version = MQTT_VERSION_3_1_1;
+                    w->client.rx_buf = w->rx_buffer;
+                    w->client.rx_buf_size = sizeof(w->rx_buffer);
+                    w->client.tx_buf = w->tx_buffer;
+                    w->client.tx_buf_size = sizeof(w->tx_buffer);
+                    w->client.keepalive = 60;
+                    w->client.clean_session = 1;
+                    w->client.user_data = w;
+                    
                     if (!w->using_fallback) {
                         /* Switch to fallback broker */
                         LOG_WRN("MQTT wrapper: Primary broker failed %d times, switching to fallback",
@@ -401,6 +427,15 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                 const char *broker_type = w->using_fallback ? "fallback" : "primary";
                 LOG_INF("MQTT wrapper attempting connection to %s broker (attempt %d/%d)...",
                         broker_type, w->current_broker_attempts + 1, CONFIG_RPR_MQTT_PRIMARY_RETRIES);
+                
+                /* Clean up any previous connection state before reconnecting */
+                if (w->client.transport.tcp.sock >= 0) {
+                    LOG_DBG("Cleaning up socket (fd=%d) before reconnect", w->client.transport.tcp.sock);
+                    mqtt_disconnect(&w->client);
+                    zsock_close(w->client.transport.tcp.sock);
+                    w->client.transport.tcp.sock = -1;
+                    k_sleep(K_MSEC(50));  /* Brief delay for cleanup */
+                }
                 
                 k_mutex_lock(&w->state_mutex, K_FOREVER);
                 w->connecting = true;
@@ -743,7 +778,7 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                             int old_files_deleted = 0;
                                             while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != '\0') {
                                                 if (strncmp(entry.name, "temp_", 5) == 0) {
-                                                    char old_file[128];
+                                                    char old_file[264];  /* Max path: /lfs/ + 255 char name */
                                                     snprintf(old_file, sizeof(old_file), "/lfs/%s", entry.name);
                                                     if (fs_unlink(old_file) == 0) {
                                                         old_files_deleted++;
