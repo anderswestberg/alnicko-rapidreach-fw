@@ -71,6 +71,13 @@ int set_date_time(struct rtc_time *rtc_data)
     tm_time->tm_hour = rtc_data->tm_hour;
     tm_time->tm_min  = rtc_data->tm_min;
     tm_time->tm_sec  = rtc_data->tm_sec;
+    tm_time->tm_wday = -1;  /* Let RTC driver calculate */
+    tm_time->tm_yday = -1;  /* Let RTC driver calculate */
+    tm_time->tm_isdst = -1; /* Unknown DST status */
+    
+    LOG_DBG("RTC set attempt: year=%d mon=%d mday=%d %02d:%02d:%02d",
+            tm_time->tm_year, tm_time->tm_mon, tm_time->tm_mday,
+            tm_time->tm_hour, tm_time->tm_min, tm_time->tm_sec);
 
     int ret = rtc_set_time(rtc_cfg.rtc, &rtctime);
     if (ret < 0) {

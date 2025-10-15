@@ -79,6 +79,15 @@ static int update_rtc_from_system_time(void)
 	rtc_data.tm_hour = tm_time->tm_hour;
 	rtc_data.tm_min = tm_time->tm_min;
 	rtc_data.tm_sec = tm_time->tm_sec;
+	rtc_data.tm_wday = tm_time->tm_wday;         /* Day of week (0-6, Sunday = 0) */
+	rtc_data.tm_yday = tm_time->tm_yday;         /* Day of year (0-365) */
+	rtc_data.tm_isdst = tm_time->tm_isdst;       /* DST flag */
+	rtc_data.tm_nsec = 0;                        /* Nanoseconds */
+	
+	LOG_DBG("Updating RTC with: %04d-%02d-%02d %02d:%02d:%02d wday=%d",
+		rtc_data.tm_year, rtc_data.tm_mon, rtc_data.tm_mday,
+		rtc_data.tm_hour, rtc_data.tm_min, rtc_data.tm_sec,
+		rtc_data.tm_wday);
 	
 	/* Update RTC */
 	int ret = set_date_time(&rtc_data);
@@ -266,10 +275,10 @@ int sntp_sync_set_periodic(bool enable, uint32_t interval_seconds)
 		state.sync_interval_sec = interval_seconds;
 		state.periodic_enabled = true;
 		
-		/* Schedule first sync */
-		k_work_schedule(&state.periodic_work, K_SECONDS(5));
+		/* Schedule first sync - delay 60 seconds to ensure network and DNS are stable */
+		k_work_schedule(&state.periodic_work, K_SECONDS(60));
 		
-		LOG_INF("Periodic SNTP sync enabled (interval: %u seconds)", 
+		LOG_INF("Periodic SNTP sync enabled (interval: %u seconds, first sync in 60s)", 
 			interval_seconds);
 	} else {
 		state.periodic_enabled = false;

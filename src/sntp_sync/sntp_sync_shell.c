@@ -9,6 +9,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/logging/log.h>
 #include <time.h>
+#include <stdlib.h>
 
 #include "sntp_sync.h"
 #include "../rtc/rtc.h"

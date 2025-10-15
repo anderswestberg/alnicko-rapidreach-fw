@@ -623,8 +623,23 @@ static int mqtt_internal_connect(void)
         return ret;
     }
 
-    LOG_INF("Attempting MQTT connection to %s:%d...", 
-            CONFIG_RPR_MQTT_BROKER_HOST, CONFIG_RPR_MQTT_BROKER_PORT);
+    /* Log the actual broker we're connecting to */
+    const char *broker_host;
+    int broker_port;
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+    if (using_fallback_broker) {
+        broker_host = CONFIG_RPR_MQTT_FALLBACK_BROKER_HOST;
+        broker_port = CONFIG_RPR_MQTT_FALLBACK_BROKER_PORT;
+    } else {
+        broker_host = CONFIG_RPR_MQTT_BROKER_HOST;
+        broker_port = CONFIG_RPR_MQTT_BROKER_PORT;
+    }
+#else
+    broker_host = CONFIG_RPR_MQTT_BROKER_HOST;
+    broker_port = CONFIG_RPR_MQTT_BROKER_PORT;
+#endif
+
+    LOG_INF("Attempting MQTT connection to %s:%d...", broker_host, broker_port);
 
     ret = mqtt_connect(&client);
     if (ret != 0) {
@@ -717,36 +732,31 @@ static void mqtt_thread_func(void *arg1, void *arg2, void *arg3)
                     /* Time to switch brokers */
                     if (!using_fallback_broker) {
                         /* Switch to fallback broker */
-#ifdef CONFIG_RPR_MODEM
-                        if (is_modem_connected()) {
+                        /* Check if we have any network connectivity */
+                        struct net_if *iface = net_if_get_default();
+                        if (iface && net_if_is_up(iface)) {
                             LOG_WRN("Primary broker failed %d times, switching to fallback broker (cycle %d)",
                                     current_broker_attempts, total_reconnect_cycles);
                             using_fallback_broker = true;
                             current_broker_attempts = 0;
                             reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
                             
-                            /* Set modem interface as default for public connectivity */
-                            modem_set_iface_default();
-                        } else {
-                            LOG_WRN("Cannot switch to fallback broker: modem not connected");
-                            LOG_INF("Attempting to initialize modem for fallback connection...");
-                            c16qs_modem_status_t modem_status = modem_init_and_connect();
-                            if (modem_status == MODEM_SUCCESS) {
-                                LOG_INF("Modem initialized successfully, will retry fallback on next attempt");
-                            } else {
-                                LOG_ERR("Modem initialization failed: %d, will retry primary", modem_status);
-                                /* Reset attempts to retry primary broker again */
-                                current_broker_attempts = 0;
-                                reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
+#ifdef CONFIG_RPR_MODEM
+                            /* If using modem, set it as default (for public fallback broker) */
+                            if (is_modem_connected()) {
+                                modem_set_iface_default();
+                                LOG_INF("Using modem interface for fallback broker");
                             }
+#endif
+                        } else {
+                            LOG_WRN("Cannot switch to fallback broker: no network interface available");
+                            LOG_INF("Waiting for network connection...");
+                            /* Reset attempts to retry primary broker */
+                            current_broker_attempts = 0;
+                            reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
                             last_reconnect_attempt = current_time;
                             continue;
                         }
-#else
-                        LOG_WRN("Fallback broker requires modem support (disabled), retrying primary");
-                        current_broker_attempts = 0;
-                        reconnect_interval_ms = MIN_RECONNECT_INTERVAL_MS;
-#endif /* CONFIG_RPR_MODEM */
                     } else {
                         /* Switch back to primary broker */
                         LOG_WRN("Fallback broker failed %d times, switching back to primary broker (cycle %d)",

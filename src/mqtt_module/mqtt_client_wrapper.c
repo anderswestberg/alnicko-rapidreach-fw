@@ -89,6 +89,14 @@ struct mqtt_client_wrapper {
     int64_t last_reconnect_ms;
     int reconnect_interval_ms;
     
+    /* Fallback broker support */
+    char primary_hostname[64];
+    char fallback_hostname[64];
+    uint16_t primary_port;
+    uint16_t fallback_port;
+    bool using_fallback;
+    int current_broker_attempts;
+    
     /* Callbacks */
     mqtt_conn_state_cb_t conn_cb;
     void *conn_cb_data;
@@ -107,6 +115,8 @@ struct mqtt_client_wrapper {
 static void protocol_thread_func(void *p1, void *p2, void *p3);
 static void mqtt_evt_handler(struct mqtt_client *const client,
                              const struct mqtt_evt *evt);
+static int resolve_and_set_broker(struct mqtt_client_wrapper *w, 
+                                   const char *hostname, uint16_t port);
 static void process_message_work(struct k_work *work);
 
 /**
@@ -188,7 +198,20 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     /* Copy client ID */
     strncpy(w->client_id, config->client_id, sizeof(w->client_id) - 1);
     
-    /* Resolve broker address */
+    /* Store primary broker config */
+    strncpy(w->primary_hostname, config->broker_hostname, sizeof(w->primary_hostname) - 1);
+    w->primary_port = config->broker_port;
+    
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+    /* Store fallback broker config */
+    strncpy(w->fallback_hostname, CONFIG_RPR_MQTT_FALLBACK_BROKER_HOST, 
+            sizeof(w->fallback_hostname) - 1);
+    w->fallback_port = CONFIG_RPR_MQTT_FALLBACK_BROKER_PORT;
+    w->using_fallback = false;
+    w->current_broker_attempts = 0;
+#endif
+    
+    /* Resolve initial broker address */
     struct addrinfo *res;
     struct addrinfo hints = {
         .ai_family = AF_INET,
@@ -198,6 +221,8 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     int ret = getaddrinfo(config->broker_hostname, NULL, &hints, &res);
     if (ret != 0) {
         LOG_ERR("Failed to resolve hostname %s", config->broker_hostname);
+        k_free(w->protocol_stack_mem);
+        k_free(w->worker_stack_mem);
         k_free(w);
         return NULL;
     }
@@ -240,8 +265,46 @@ mqtt_handle_t mqtt_wrapper_create(const struct mqtt_client_config *config)
     w->reconnect_interval_ms = CONFIG_MQTT_WRAPPER_RECONNECT_MIN_INTERVAL_MS;
     w->large_msg_processed = false;
     
+#ifndef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+    /* Initialize fallback flags even if not used */
+    w->using_fallback = false;
+    w->current_broker_attempts = 0;
+#endif
+    
     LOG_INF("MQTT wrapper initialized: %s", w->client_id);
     return (mqtt_handle_t)w;
+}
+
+/**
+ * @brief Resolve and set broker address
+ */
+static int resolve_and_set_broker(struct mqtt_client_wrapper *w, 
+                                   const char *hostname, uint16_t port)
+{
+    struct addrinfo *res;
+    struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_STREAM
+    };
+    
+    int ret = getaddrinfo(hostname, NULL, &hints, &res);
+    if (ret != 0) {
+        LOG_ERR("Failed to resolve hostname %s: %d", hostname, ret);
+        return -EHOSTUNREACH;
+    }
+    
+    memcpy(&w->broker, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
+    
+    /* Set port */
+    struct sockaddr_in *addr4 = (struct sockaddr_in *)&w->broker;
+    addr4->sin_port = htons(port);
+    
+    /* Update client broker pointer */
+    w->client.broker = &w->broker;
+    
+    LOG_INF("Broker resolved: %s:%d", hostname, port);
+    return 0;
 }
 
 /**
@@ -310,7 +373,35 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
             /* Reconnection logic */
             int64_t now = k_uptime_get();
             if (now - w->last_reconnect_ms >= w->reconnect_interval_ms) {
-                LOG_INF("MQTT wrapper attempting connection...");
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+                /* Check if we should switch brokers after failed attempts */
+                if (w->current_broker_attempts >= CONFIG_RPR_MQTT_PRIMARY_RETRIES) {
+                    if (!w->using_fallback) {
+                        /* Switch to fallback broker */
+                        LOG_WRN("MQTT wrapper: Primary broker failed %d times, switching to fallback",
+                                w->current_broker_attempts);
+                        if (resolve_and_set_broker(w, w->fallback_hostname, w->fallback_port) == 0) {
+                            w->using_fallback = true;
+                            w->current_broker_attempts = 0;
+                            w->reconnect_interval_ms = CONFIG_MQTT_WRAPPER_RECONNECT_MIN_INTERVAL_MS;
+                        }
+                    } else {
+                        /* Switch back to primary broker */
+                        LOG_WRN("MQTT wrapper: Fallback broker failed %d times, switching to primary",
+                                w->current_broker_attempts);
+                        if (resolve_and_set_broker(w, w->primary_hostname, w->primary_port) == 0) {
+                            w->using_fallback = false;
+                            w->current_broker_attempts = 0;
+                            w->reconnect_interval_ms = CONFIG_MQTT_WRAPPER_RECONNECT_MIN_INTERVAL_MS;
+                        }
+                    }
+                }
+#endif
+                
+                const char *broker_type = w->using_fallback ? "fallback" : "primary";
+                LOG_INF("MQTT wrapper attempting connection to %s broker (attempt %d/%d)...",
+                        broker_type, w->current_broker_attempts + 1, CONFIG_RPR_MQTT_PRIMARY_RETRIES);
+                
                 k_mutex_lock(&w->state_mutex, K_FOREVER);
                 w->connecting = true;
                 w->last_reconnect_ms = now;
@@ -321,6 +412,7 @@ static void protocol_thread_func(void *p1, void *p2, void *p3)
                     LOG_ERR("MQTT wrapper connect failed: %d", ret);
                     k_mutex_lock(&w->state_mutex, K_FOREVER);
                     w->connecting = false;
+                    w->current_broker_attempts++;
                     /* Exponential backoff */
                     w->reconnect_interval_ms = MIN(
                         w->reconnect_interval_ms * 2,
@@ -365,11 +457,17 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
     switch (evt->type) {
     case MQTT_EVT_CONNACK:
         if (evt->result == 0) {
+#ifdef CONFIG_RPR_MQTT_FALLBACK_BROKER_ENABLED
+            const char *broker_type = w->using_fallback ? "fallback" : "primary";
+            LOG_INF("MQTT WRAPPER CONNECTED SUCCESSFULLY to %s broker!", broker_type);
+#else
             LOG_INF("MQTT WRAPPER CONNECTED SUCCESSFULLY!");
+#endif
             k_mutex_lock(&w->state_mutex, K_FOREVER);
             w->connected = true;
             w->connecting = false;
             w->reconnect_interval_ms = CONFIG_MQTT_WRAPPER_RECONNECT_MIN_INTERVAL_MS;
+            w->current_broker_attempts = 0;  /* Reset attempts on successful connection */
             k_mutex_unlock(&w->state_mutex);
             
             /* Notify callback */

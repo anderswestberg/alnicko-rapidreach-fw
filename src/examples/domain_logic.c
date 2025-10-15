@@ -272,27 +272,44 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
         return;
     }
     if (mgmt_event == NET_EVENT_L4_CONNECTED) {
-        /* Check if already connected to avoid redundant interface switching */
-        if (net_ctx.connected) {
-            LOG_DBG("Network already connected, ignoring duplicate L4_CONNECTED event");
-            return;
+#if defined(CONFIG_RPR_ETHERNET)
+        /* Ethernet gets highest priority - switch to it even if another interface is active */
+        if (is_ethernet_iface(iface)) {
+            /* Check if we're already on Ethernet */
+            if (net_ctx.connected && net_ctx.status == NET_CONNECT_ETHERNET) {
+                LOG_DBG("Ethernet already connected and active");
+                return;
+            }
+            
+            /* Shutdown modem if it's currently active - Ethernet takes priority */
+#if defined(CONFIG_RPR_MODEM)
+            if (net_ctx.connected && net_ctx.status == NET_CONNECT_LTE) {
+                LOG_INF("Ethernet available - shutting down LTE modem to save data");
+                modem_shutdown();
+            }
+#endif
+            
+            /* Set Ethernet as default interface */
+            if (ethernet_set_iface_default() == ETHERNET_OK) {
+                net_ctx.status = NET_CONNECT_ETHERNET;
+                LOG_INF("Switched to Ethernet interface (highest priority)");
+            } else {
+                LOG_ERR("Failed to set Ethernet as default interface");
+                return;
+            }
+        } else
+#endif
+        {
+            /* For other interfaces, only connect if no interface is currently active */
+            if (net_ctx.connected) {
+                LOG_DBG("Network already connected via higher priority interface, ignoring");
+                return;
+            }
         }
 
 #if defined(CONFIG_RPR_ETHERNET)
-        if (is_ethernet_iface(iface)) {
-            /* Only set as default if not already default */
-            if (!is_ethernet_iface_default()) {
-                if (ethernet_set_iface_default() == ETHERNET_OK) {
-                    net_ctx.status = NET_CONNECT_ETHERNET;
-                    LOG_INF("Ethernet interface set as default");
-                } else {
-                    LOG_ERR("Failed to set Ethernet as default interface");
-                }
-            } else {
-                net_ctx.status = NET_CONNECT_ETHERNET;
-                LOG_DBG("Ethernet already default interface");
-            }
-        } else
+        /* This else clause handles non-Ethernet interfaces after priority check */
+        if (!is_ethernet_iface(iface))
 #endif
 #if defined(CONFIG_RPR_WIFI)
                 if (is_wifi_iface(iface)) {
@@ -408,10 +425,35 @@ static void net_mgmt_event_handler(struct net_mgmt_event_callback *cb,
             LOG_INF("Waiting for network to be connected");
         } else {
             led_off(NET_LINK_LED);
-
-            LOG_INF("Network disconnected");
-            net_ctx.connected = false;
-            net_ctx.status    = NET_CONNECT_NO_INTERFACE;
+            
+#if defined(CONFIG_RPR_ETHERNET)
+            /* If Ethernet disconnected, try to fallback to LTE modem */
+            if (is_ethernet_iface(iface)) {
+                LOG_WRN("Ethernet disconnected");
+#if defined(CONFIG_RPR_MODEM)
+                LOG_INF("Attempting to fallback to LTE modem...");
+                /* Try to connect via modem as fallback */
+                c16qs_modem_status_t modem_status = modem_init_and_connect();
+                if (modem_status == MODEM_SUCCESS) {
+                    LOG_INF("Successfully fell back to LTE modem");
+                    /* Connection status will be updated by L4_CONNECTED event */
+                } else {
+                    LOG_ERR("Failed to fallback to LTE modem: %d", modem_status);
+                    net_ctx.connected = false;
+                    net_ctx.status = NET_CONNECT_NO_INTERFACE;
+                }
+#else
+                LOG_WRN("No fallback available - modem not enabled");
+                net_ctx.connected = false;
+                net_ctx.status = NET_CONNECT_NO_INTERFACE;
+#endif
+            } else
+#endif
+            {
+                LOG_INF("Network disconnected");
+                net_ctx.connected = false;
+                net_ctx.status    = NET_CONNECT_NO_INTERFACE;
+            }
         }
         k_sem_reset(&net_ctx.net_app_sem);
         return;

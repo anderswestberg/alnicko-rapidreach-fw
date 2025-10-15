@@ -82,6 +82,7 @@ metadata:
     metallb.universe.tf/loadBalancerIPs: "192.168.2.79"
 spec:
   type: LoadBalancer
+  externalTrafficPolicy: Local  # Preserve source IP addresses
   selector:
     app: emqx
   ports:
