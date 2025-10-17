@@ -618,10 +618,10 @@ static bool audio_player_stream_and_decoder_init(ogg_sync_state   *oy,
 
     LOG_DBG("dec_size: %d", dec_size);
 
-    /* Always allocate 2x for sample duplication (stereo layout)*/
+    /* Allocate 2x for decoder state + output buffer + duplication space */
     DecConfigOpus.pInternalMemory = malloc(dec_size * DUPLICATION_FACTOR);
-    LOG_INF("Allocating %u bytes for decoder (with 2x duplication buffer)", 
-            dec_size * DUPLICATION_FACTOR);
+    LOG_INF("Allocating %u bytes for decoder (dec_size=%u, with 2x for duplication)", 
+            dec_size * DUPLICATION_FACTOR, dec_size);
     
     if (!DecConfigOpus.pInternalMemory) {
         LOG_ERR("Decoder memory allocation failed");
