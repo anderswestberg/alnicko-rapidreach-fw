@@ -605,28 +605,23 @@ static bool audio_player_stream_and_decoder_init(ogg_sync_state   *oy,
             header.input_sample_rate,
             header.channels);
 
-    /* REVERT: Use hardcoded values that were working before */
-    DecConfigOpus.sample_freq = SAMPLE_FREQUENCY;  /* 48000 Hz */
-    DecConfigOpus.channels    = MONO_CHANNELS;     /* 1 */
-    DecConfigOpus.ms_frame    = DECODER_MS_FRAME;  /* 20 */
+    /* Use the ACTUAL sample rate from the file header, not hardcoded config */
+    /* This allows us to decode files encoded at different sample rates */
+    DecConfigOpus.sample_freq = header.input_sample_rate;  /* Use actual from file */
+    DecConfigOpus.channels    = header.channels;           /* Use actual from file */
+    DecConfigOpus.ms_frame    = DECODER_MS_FRAME;          /* 20 - standard frame duration */
     
-    LOG_INF("Configuring Opus decoder (HARDCODED): %u Hz, %u channels",
+    LOG_INF("Configuring Opus decoder: %u Hz, %u channels",
             DecConfigOpus.sample_freq, DecConfigOpus.channels);
 
     uint32_t dec_size = DEC_Opus_getMemorySize(&DecConfigOpus);
 
     LOG_DBG("dec_size: %d", dec_size);
 
-#ifdef CONFIG_RPR_AUDIO_PLAYER_STEREO
-    /* For stereo: allocate 2× space for sample duplication */
+    /* Always allocate 2x for sample duplication (stereo layout)*/
     DecConfigOpus.pInternalMemory = malloc(dec_size * DUPLICATION_FACTOR);
-    LOG_INF("Stereo mode: allocating %u bytes for decoder (2× for duplication)", 
+    LOG_INF("Allocating %u bytes for decoder (with 2x duplication buffer)", 
             dec_size * DUPLICATION_FACTOR);
-#else
-    /* For mono: allocate exact size needed */
-    DecConfigOpus.pInternalMemory = malloc(dec_size);
-    LOG_INF("Mono mode: allocating %u bytes for decoder", dec_size);
-#endif
     
     if (!DecConfigOpus.pInternalMemory) {
         LOG_ERR("Decoder memory allocation failed");
@@ -702,15 +697,12 @@ static bool audio_player_decode_and_write(ogg_packet *op)
     int16_t *pcm_ptr = (int16_t *)DecConfigOpus.pInternalMemory;
     int      samples_remaining;
 
-#ifdef CONFIG_RPR_AUDIO_PLAYER_STEREO
-    /* For stereo output: duplicate mono samples to create stereo layout */
+    /* IMPORTANT: Always duplicate samples for proper I2S output */
+    /* This converts mono decoded data to the stereo layout the I2S expects */
     samples_remaining = duplicate_samples(pcm_ptr, decoded_samples);
-    LOG_DBG("Stereo mode: duplicated %d samples to %d", decoded_samples, samples_remaining);
-#else
-    /* For mono output: use decoded samples directly (no duplication) */
-    samples_remaining = decoded_samples;
-    LOG_DBG("Mono mode: using %d samples directly", samples_remaining);
-#endif
+    
+    LOG_DBG("Decoded %d samples, after duplication: %d samples", 
+            decoded_samples, samples_remaining);
 
     while (samples_remaining > 0) {
         void *mem_block;
