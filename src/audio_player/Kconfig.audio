@@ -31,9 +31,10 @@ config RPR_I2S_BLOCK_BUFFERS
 
 config RPR_SAMPLE_FREQ
 	  int "Sample rate"
-	  default 48000
+	  default 16000
 	  help
-	    Sample frequency of the system.
+	    Sample frequency of the system. 16kHz is standard for speech/VOIP.
+	    Use 48000 for higher quality audio or music playback.
 
 
 config RPR_MEASURING_DECODE_TIME

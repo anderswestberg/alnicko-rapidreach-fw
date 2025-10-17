@@ -1,0 +1,61 @@
+HTTPS/JSON registration system to obtain device credentials and MQTT broker configuration from RapidReach SaaS. Includes secure storage and idempotent behavior.
+HTTP client for device registration with JSON payload construction, TLS security, and response parsing.
+Create function to build registration JSON with device ID, hardware info, capabilities, and firmware version.
+Function to perform HTTPS POST with TLS, timeout handling, and error code mapping.
+Parse JSON response to extract device_secret, primary_mqtt_url, backup_mqtt_url with validation.
+Implement exponential backoff retry mechanism with max attempts and idempotent behavior.
+NVS-based storage for device secrets and MQTT broker URLs with integrity protection.
+Functions to save/load device secret with CRC32 integrity checking and encryption if available.
+Store and retrieve primary/backup MQTT broker URLs with validation and default fallback.
+Function to clear all registration data (secret, URLs) for factory reset or re-provisioning.
+Process incoming MQTT PUBLISH messages with JSON envelope followed by Opus audio data for instant playback.
+Parse mixed MQTT payload with JSON prefix containing size information followed by binary Opus data.
+Parse JSON prefix to extract size, priority, save_to_file flag, and other metadata.
+Validate that JSON size field matches actual MQTT payload length and detect truncation.
+Extract binary Opus data starting after JSON header and prepare for streaming to decoder.
+Buffer and reassemble large MQTT messages that exceed single packet size limits.
+Low-latency audio pipeline from MQTT to speaker with minimal buffering and priority handling.
+Interrupt current audio playback for emergency alerts with fade-out/fade-in if configured.
+Stream Opus data directly to decoder without unnecessary memory copies for minimum latency.
+Manage audio buffers to prevent underruns while maintaining low latency and handling backpressure.
+Optional functionality to save received audio to filesystem for later playback by filename.
+Save Opus audio data to file with atomic write operations and filename sanitization.
+Play saved audio files by filename via MQTT command with existence checking.
+Automatic cleanup of old audio files based on age, storage space, and retention policies.
+Respond to status requests and send periodic heartbeats to prevent being marked offline by RapidReach SaaS.
+Handle on-demand status requests via MQTT and respond with comprehensive device information.
+Collect battery level, IP addresses, signal strength, uptime, error counts from various modules.
+Build JSON status response with device metrics, timestamps, and error information.
+Periodic heartbeat transmission with adaptive intervals and offline detection recovery.
+Configurable timer for periodic heartbeat with persistence across reboots.
+Adjust heartbeat frequency based on network conditions and SaaS response patterns.
+Detect prolonged offline state and implement recovery strategies (reconnect, registration refresh).
+Configurable self-test system that plays test tones and verifies speaker output via microphone feedback with ambient noise rejection.
+Generate configurable test tones for speaker verification with frequency sweep and amplitude control.
+Generate pure sine waves at specified frequencies and amplitudes for audio testing.
+Generate frequency sweeps to test speaker response across the audio spectrum.
+Sequence multiple test patterns (silence, tone, sweep) for comprehensive speaker testing.
+Capture microphone input during self-test and analyze for speaker verification with noise rejection.
+Capture microphone audio in sync with test tone playback using windowed sampling.
+Correlate captured audio with expected test tone to detect speaker output presence.
+Filter out ambient noise and identify direct speaker signal using frequency domain analysis.
+Implement configurable thresholds and decision logic for self-test pass/fail determination.
+MQTT-based operational controls for device management including restart, network configuration, and registration management.
+Safe device restart via MQTT command with graceful shutdown and safety checks.
+Safely stop audio playback, close connections, and sync filesystem before restart.
+MQTT command handler for restart with authentication and delayed execution for command response.
+Configure Wi-Fi credentials via MQTT with validation and automatic reconnection.
+Parse and validate SSID/password from MQTT message with security checks.
+Apply new Wi-Fi credentials and handle connection state changes with status reporting.
+Configure network interface priority (LTE/Ethernet/Wi-Fi) via MQTT with persistent storage.
+Parse network priority order from MQTT message and validate interface names.
+Apply network priority by configuring default routes and interface preferences.
+Comprehensive logging system with MQTT-based log retrieval and usage statistics tracking.
+Centralized logging with multiple severity levels and MQTT-based retrieval/clearing.
+Circular log buffer with configurable size and automatic rotation when full.
+Stream log entries via MQTT in paginated format with timestamp and severity filtering.
+Clear log buffer via MQTT command with confirmation and optional selective clearing.
+Track device usage metrics including power cycles, audio playback statistics, and error counts.
+Persistent boot counter to track power cycles and unexpected restarts.
+Track number of messages played, total playback time, and audio format statistics.
+Count and categorize various error types (network, audio, storage) for diagnostics.

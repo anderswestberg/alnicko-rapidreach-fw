@@ -1063,6 +1063,19 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
                                         fs_close(&file);
                                         LOG_INF("Audio file written: %zu bytes", bytes_written);
                                         
+                                        /* Verify file size on disk */
+                                        struct fs_dirent entry;
+                                        if (fs_stat(filepath, &entry) == 0) {
+                                            LOG_INF("File size on disk: %zu bytes (expected %zu)", 
+                                                   entry.size, bytes_written);
+                                            if (entry.size != bytes_written) {
+                                                LOG_ERR("FILE SIZE MISMATCH! Written %zu but on disk %zu", 
+                                                       bytes_written, entry.size);
+                                            }
+                                        } else {
+                                            LOG_ERR("Failed to stat file after write!");
+                                        }
+                                        
                                         /* Queue audio file directly for playback */
                                         struct audio_queue_item audio_item = {
                                             .volume = 100,        /* Default volume */

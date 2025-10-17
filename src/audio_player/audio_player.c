@@ -670,7 +670,7 @@ static bool audio_player_decode_and_write(ogg_packet *op)
             op->packet, op->bytes, DecConfigOpus.pInternalMemory);
     if (decoded_samples < 0) {
         LOG_ERR("Opus decoding error: %d", decoded_samples);
-        return true;
+        return false;
     }
     
     /* Yield after decode to allow MQTT thread to run */
