@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 /**
  * @brief Parse a string to a signed integer with error handling
@@ -44,5 +45,34 @@ bool cli_parse_uint(const char *str, unsigned int *value, unsigned int min, unsi
  * @return true on successful parse within range, false otherwise
  */
 bool cli_parse_long(const char *str, long *value, long min, long max);
+
+/**
+ * @brief Get the current working directory
+ * 
+ * @return Pointer to current working directory string (statically allocated)
+ */
+const char *cli_get_cwd(void);
+
+/**
+ * @brief Set the current working directory
+ * 
+ * @param path Path to set as current directory
+ * @return true on success, false on failure
+ */
+bool cli_set_cwd(const char *path);
+
+/**
+ * @brief Resolve a path relative to current working directory
+ * 
+ * Converts relative or absolute paths to absolute paths:
+ * - If path starts with "/", use as-is (absolute)
+ * - Otherwise, resolve relative to current working directory
+ * 
+ * @param path Input path (can be relative or absolute)
+ * @param out_path Buffer to store resolved path
+ * @param max_len Maximum length of out_path buffer
+ * @return true on success, false on failure
+ */
+bool cli_resolve_path(const char *path, char *out_path, size_t max_len);
 
 #endif /* _CLI_UTILS_H_ */

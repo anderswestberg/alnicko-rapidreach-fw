@@ -73,6 +73,8 @@ LOG_MODULE_REGISTER(cli_module, LOG_LEVEL_INF);
 #include "power_supervisor.h"
 #endif
 
+#include "cli_utils.h"
+
 #define FULL_FILE_PATH_MAX_LEN \
     (CONFIG_RPR_FOLDER_PATH_MAX_LEN + CONFIG_RPR_FILENAME_MAX_LEN)
 
@@ -2990,7 +2992,7 @@ static int cmd_rm_wildcard(const struct shell *sh, size_t argc, char **argv)
 
     struct fs_dir_t dir;
     struct fs_dirent entry;
-    char full_path[128];
+    char full_path[512];
     int deleted_count = 0;
     const char *pattern = argv[1];
     bool delete_all = (strcmp(pattern, "-all") == 0);
@@ -3053,7 +3055,13 @@ static int cmd_rm_wildcard(const struct shell *sh, size_t argc, char **argv)
 }
 
 /**
- * @brief List files in /lfs with size and count information
+ * @brief List files in a directory with size information
+ * Usage: app ls [path]
+ * If path not specified, defaults to /lfs (or current working directory)
+ * Examples:
+ *   app ls              - List files in /lfs
+ *   app ls /lfs/audio   - List files in /lfs/audio/
+ *   app ls /lfs/backup/ - List files in /lfs/backup/
  */
 static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
 {
@@ -3064,15 +3072,25 @@ static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
     int temp_count = 0;
     size_t total_size = 0;
     size_t temp_size = 0;
+    char list_path[128];
+    
+    /* Get path from argument or use current directory */
+    const char *target_path = (argc >= 2) ? argv[1] : cli_get_cwd();
+    
+    /* Resolve relative paths */
+    if (!cli_resolve_path(target_path, list_path, sizeof(list_path))) {
+        shell_error(sh, "Path too long");
+        return -EINVAL;
+    }
     
     fs_dir_t_init(&dir);
     
-    if (fs_opendir(&dir, "/lfs") != 0) {
-        shell_error(sh, "Failed to open /lfs directory");
+    if (fs_opendir(&dir, list_path) != 0) {
+        shell_error(sh, "Failed to open directory: %s", list_path);
         return -ENOENT;
     }
     
-    shell_print(sh, "Files in /lfs:");
+    shell_print(sh, "Files in %s:", list_path);
     shell_print(sh, "%-30s %10s", "Name", "Size");
     shell_print(sh, "----------------------------------------");
     
@@ -3099,7 +3117,7 @@ static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
     }
     
     /* Get filesystem stats */
-    if (fs_statvfs("/lfs", &stats) == 0) {
+    if (fs_statvfs(list_path, &stats) == 0) {
         size_t total_space = stats.f_blocks * stats.f_frsize;
         size_t free_space = stats.f_bfree * stats.f_frsize;
         size_t used_space = total_space - free_space;
@@ -3111,6 +3129,171 @@ static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
         shell_print(sh, "  Free:  %zu KB (%d%%)", free_space / 1024,
                    (int)((free_space * 100) / total_space));
     }
+    
+    return 0;
+}
+
+/**
+ * @brief Copy file between directories
+ * Usage: app cp <source_pattern> [destination_dir]
+ * Source pattern can include path. If no path, uses current working directory
+ * If destination not specified, copies to current working directory
+ * Examples:
+ *   app cp alert.opus /lfs/audio/              - Copy from CWD to /lfs/audio/
+ *   app cp *.opus /lfs/audio/                  - Copy all *.opus from CWD to /lfs/audio/
+ *   app cp /lfs/test/files/*.opus /lfs/audio/  - Copy from /lfs/test/files/ to /lfs/audio/
+ *   app cp *.opus                              - Copy *.opus within CWD
+ */
+static int cmd_cp_to_audio(const struct shell *sh, size_t argc, char **argv)
+{
+    if (argc < 2) {
+        shell_error(sh, "Usage: app cp <source_pattern> [destination_dir]");
+        shell_print(sh, "If destination not specified, uses current directory");
+        shell_print(sh, "Examples:");
+        shell_print(sh, "  app cp alert.opus /lfs/audio/              - Copy from CWD to /lfs/audio/");
+        shell_print(sh, "  app cp *.opus /lfs/audio/                  - Copy *.opus from CWD to /lfs/audio/");
+        shell_print(sh, "  app cp /lfs/test/files/*.opus /lfs/audio/  - Copy from /lfs/test/files/ to /lfs/audio/");
+        shell_print(sh, "  app cp *.opus                              - Copy *.opus within CWD");
+        return -EINVAL;
+    }
+
+    struct fs_dir_t dir;
+    struct fs_dirent entry;
+    char src_path[256];
+    char dst_path[256];
+    char src_dir[128];
+    char pattern[64];
+    int copied_count = 0;
+    const char *source_arg = argv[1];
+    const char *dst_dir = (argc >= 3) ? argv[2] : cli_get_cwd();
+    
+    /* Parse source argument to extract directory and pattern */
+    const char *last_slash = strrchr(source_arg, '/');
+    if (last_slash != NULL && last_slash != source_arg) {
+        /* Source includes a path like /lfs/test/files/*.opus */
+        size_t dir_len = last_slash - source_arg;
+        strncpy(src_dir, source_arg, dir_len);
+        src_dir[dir_len] = '\0';
+        strcpy(pattern, last_slash + 1);
+    } else if (last_slash == source_arg) {
+        /* Source starts with / but is just "/" - not valid */
+        shell_error(sh, "Invalid source path");
+        return -EINVAL;
+    } else {
+        /* No path specified, use current working directory */
+        strcpy(src_dir, cli_get_cwd());
+        strcpy(pattern, source_arg);
+    }
+    
+    fs_dir_t_init(&dir);
+    
+    if (fs_opendir(&dir, src_dir) != 0) {
+        shell_error(sh, "Failed to open source directory: %s", src_dir);
+        return -ENOENT;
+    }
+    
+    /* Ensure destination directory exists */
+    fs_mkdir(dst_dir);
+    
+    shell_print(sh, "Copying files matching pattern: %s from %s to %s", pattern, src_dir, dst_dir);
+    
+    while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != 0) {
+        if (entry.type == FS_DIR_ENTRY_FILE) {
+            bool should_copy = false;
+            
+            /* Simple wildcard matching */
+            if (pattern[0] == '*') {
+                /* Suffix match: *.ext */
+                const char *suffix = pattern + 1;
+                size_t name_len = strlen(entry.name);
+                size_t suffix_len = strlen(suffix);
+                if (name_len >= suffix_len) {
+                    should_copy = (strcmp(entry.name + name_len - suffix_len, suffix) == 0);
+                }
+            } else if (pattern[strlen(pattern) - 1] == '*') {
+                /* Prefix match: prefix* */
+                size_t prefix_len = strlen(pattern) - 1;
+                should_copy = (strncmp(entry.name, pattern, prefix_len) == 0);
+            } else {
+                /* Exact match */
+                should_copy = (strcmp(entry.name, pattern) == 0);
+            }
+            
+            if (should_copy) {
+                snprintf(src_path, sizeof(src_path), "%s/%s", src_dir, entry.name);
+                
+                /* Determine destination path:
+                 * If dst_dir ends with '/', it's a directory - append filename
+                 * Otherwise, treat it as a file path for single file copy
+                 */
+                if (dst_dir[strlen(dst_dir) - 1] == '/') {
+                    /* Directory destination */
+                    snprintf(dst_path, sizeof(dst_path), "%s%s", dst_dir, entry.name);
+                } else {
+                    /* File destination - check if it's a file or directory */
+                    struct fs_dirent dest_entry;
+                    struct fs_dir_t dest_dir;
+                    bool is_dir = false;
+                    
+                    /* Try to open as directory */
+                    fs_dir_t_init(&dest_dir);
+                    if (fs_opendir(&dest_dir, dst_dir) == 0) {
+                        is_dir = true;
+                        fs_closedir(&dest_dir);
+                    }
+                    
+                    if (is_dir) {
+                        /* Destination is a directory - append filename */
+                        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst_dir, entry.name);
+                    } else {
+                        /* Destination is a file path - use as-is for single file copy */
+                        snprintf(dst_path, sizeof(dst_path), "%s", dst_dir);
+                    }
+                }
+                
+                /* Read source file */
+                struct fs_file_t src_file;
+                struct fs_file_t dst_file;
+                uint8_t buffer[512];
+                ssize_t bytes_read;
+                
+                fs_file_t_init(&src_file);
+                fs_file_t_init(&dst_file);
+                
+                if (fs_open(&src_file, src_path, FS_O_READ) != 0) {
+                    shell_error(sh, "Failed to open source: %s", entry.name);
+                    continue;
+                }
+                
+                if (fs_open(&dst_file, dst_path, FS_O_CREATE | FS_O_RDWR) != 0) {
+                    shell_error(sh, "Failed to create destination: %s", entry.name);
+                    fs_close(&src_file);
+                    continue;
+                }
+                
+                /* Copy file contents */
+                int copy_failed = 0;
+                while ((bytes_read = fs_read(&src_file, buffer, sizeof(buffer))) > 0) {
+                    if (fs_write(&dst_file, buffer, bytes_read) != bytes_read) {
+                        shell_error(sh, "Failed to write to destination: %s", entry.name);
+                        copy_failed = 1;
+                        break;
+                    }
+                }
+                
+                fs_close(&src_file);
+                fs_close(&dst_file);
+                
+                if (!copy_failed) {
+                    shell_print(sh, "Copied: %s -> %s", entry.name, dst_dir);
+                    copied_count++;
+                }
+            }
+        }
+    }
+    
+    fs_closedir(&dir);
+    shell_print(sh, "Total files copied: %d", copied_count);
     
     return 0;
 }
@@ -3138,6 +3321,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         SHELL_CMD(test, NULL, "Test command", cmd_test),
         SHELL_CMD(ls, NULL, "List files in /lfs", cmd_ls),
         SHELL_CMD(rm, NULL, "Remove files with wildcard support", cmd_rm_wildcard),
+        SHELL_CMD(cp, NULL, "Copy files to /lfs/audio/ folder", cmd_cp_to_audio),
         SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(app, &sub_app, "Application commands", NULL);

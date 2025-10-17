@@ -605,13 +605,13 @@ static bool audio_player_stream_and_decoder_init(ogg_sync_state   *oy,
             header.input_sample_rate,
             header.channels);
 
-    /* Use the ACTUAL sample rate from the file header, not hardcoded config */
-    /* This allows us to decode files encoded at different sample rates */
-    DecConfigOpus.sample_freq = header.input_sample_rate;  /* Use actual from file */
-    DecConfigOpus.channels    = header.channels;           /* Use actual from file */
-    DecConfigOpus.ms_frame    = DECODER_MS_FRAME;          /* 20 - standard frame duration */
+    /* Use hardcoded values like the working version (commit 3c0b007) */
+    /* Opus library handles resampling automatically */
+    DecConfigOpus.sample_freq = SAMPLE_FREQUENCY;  /* Fixed 48000 Hz */
+    DecConfigOpus.channels    = MONO_CHANNELS;     /* Fixed 1 channel */
+    DecConfigOpus.ms_frame    = DECODER_MS_FRAME;  /* 20ms frames */
     
-    LOG_INF("Configuring Opus decoder: %u Hz, %u channels",
+    LOG_INF("Configuring Opus decoder: %u Hz, %u channels (hardcoded)",
             DecConfigOpus.sample_freq, DecConfigOpus.channels);
 
     uint32_t dec_size = DEC_Opus_getMemorySize(&DecConfigOpus);
