@@ -617,7 +617,17 @@ static bool audio_player_stream_and_decoder_init(ogg_sync_state   *oy,
 
     LOG_DBG("dec_size: %d", dec_size);
 
+#ifdef CONFIG_RPR_AUDIO_PLAYER_STEREO
+    /* For stereo: allocate 2× space for sample duplication */
     DecConfigOpus.pInternalMemory = malloc(dec_size * DUPLICATION_FACTOR);
+    LOG_INF("Stereo mode: allocating %u bytes for decoder (2× for duplication)", 
+            dec_size * DUPLICATION_FACTOR);
+#else
+    /* For mono: allocate exact size needed */
+    DecConfigOpus.pInternalMemory = malloc(dec_size);
+    LOG_INF("Mono mode: allocating %u bytes for decoder", dec_size);
+#endif
+    
     if (!DecConfigOpus.pInternalMemory) {
         LOG_ERR("Decoder memory allocation failed");
         return false;
@@ -666,8 +676,21 @@ static size_t duplicate_samples(int16_t *buffer, size_t samples)
  */
 static bool audio_player_decode_and_write(ogg_packet *op)
 {
+#ifdef CONFIG_RPR_MEASURING_DECODE_TIME
+    uint64_t decode_start = k_uptime_get();
+#endif
+    
     int decoded_samples = DEC_Opus_Decode(
             op->packet, op->bytes, DecConfigOpus.pInternalMemory);
+    
+#ifdef CONFIG_RPR_MEASURING_DECODE_TIME
+    uint64_t decode_time = k_uptime_delta(&decode_start);
+    if (decode_time > 10) {  // Log only slow decodes (>10ms)
+        LOG_DBG("Opus decode took %lld ms for packet (%u bytes -> %d samples)", 
+                decode_time, op->bytes, decoded_samples);
+    }
+#endif
+    
     if (decoded_samples < 0) {
         LOG_ERR("Opus decoding error: %d", decoded_samples);
         return false;
@@ -676,8 +699,18 @@ static bool audio_player_decode_and_write(ogg_packet *op)
     /* Yield after decode to allow MQTT thread to run */
     k_yield();
 
-    int16_t *pcm_ptr           = (int16_t *)DecConfigOpus.pInternalMemory;
-    int      samples_remaining = duplicate_samples(pcm_ptr, decoded_samples);
+    int16_t *pcm_ptr = (int16_t *)DecConfigOpus.pInternalMemory;
+    int      samples_remaining;
+
+#ifdef CONFIG_RPR_AUDIO_PLAYER_STEREO
+    /* For stereo output: duplicate mono samples to create stereo layout */
+    samples_remaining = duplicate_samples(pcm_ptr, decoded_samples);
+    LOG_DBG("Stereo mode: duplicated %d samples to %d", decoded_samples, samples_remaining);
+#else
+    /* For mono output: use decoded samples directly (no duplication) */
+    samples_remaining = decoded_samples;
+    LOG_DBG("Mono mode: using %d samples directly", samples_remaining);
+#endif
 
     while (samples_remaining > 0) {
         void *mem_block;
@@ -837,7 +870,7 @@ static void audio_thread_func(void)
 
 #ifdef CONFIG_RPR_MEASURING_DECODE_TIME
             decoded_samples_total = 0;
-            uint64_t time_stamp   = k_uptime_get();
+            uint64_t decode_time_start = k_uptime_get();
 #endif
 
             LOG_INF("Playback start");
@@ -898,9 +931,10 @@ static void audio_thread_func(void)
             }
 
 #ifdef CONFIG_RPR_MEASURING_DECODE_TIME
-            int64_t delta_time = k_uptime_delta(&time_stamp);
-            LOG_INF("The opus file was decoded in %lld ms", delta_time);
-            LOG_INF("Samples decoded %d", decoded_samples_total);
+            int64_t total_decode_time = k_uptime_delta(&decode_time_start);
+            LOG_INF("Total time (decode + I2S output): %lld ms for %d packets", 
+                    total_decode_time, decoded_samples_total);
+            LOG_INF("Note: Time includes I2S writes and yields - pure decode is typically <1ms per packet");
 #endif
 
             LOG_INF("Playback finished");
