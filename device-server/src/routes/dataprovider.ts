@@ -38,6 +38,57 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
         return;
       }
 
+      // Special handling for devices - use MQTT client's live device registry
+      if (resource === 'devices') {
+        // Get devices from MQTT client (live registry)
+        let devices = _mqttClient.getDevices().map(device => ({
+          id: device.id,
+          deviceId: device.id,  // Map id to deviceId for compatibility with audio routes
+          clientId: device.metadata?.clientId || device.id,
+          type: device.type,
+          status: device.status,
+          lastSeen: device.lastSeen,
+          ...device.metadata,
+        }));
+
+        // Apply filter
+        const mongoFilter: any = filter || {};
+        if (mongoFilter.status) {
+          devices = devices.filter(d => d.status === mongoFilter.status);
+        }
+        if (mongoFilter.id) {
+          if (Array.isArray(mongoFilter.id)) {
+            devices = devices.filter(d => mongoFilter.id.includes(d.id));
+          } else {
+            devices = devices.filter(d => d.id === mongoFilter.id);
+          }
+        }
+        if (mongoFilter.type) {
+          devices = devices.filter(d => d.type === mongoFilter.type);
+        }
+
+        // Apply sorting
+        const [field, order] = sort;
+        devices.sort((a, b) => {
+          const aVal = (a as any)[field];
+          const bVal = (b as any)[field];
+          if (aVal < bVal) return order === 'ASC' ? -1 : 1;
+          if (aVal > bVal) return order === 'ASC' ? 1 : -1;
+          return 0;
+        });
+
+        // Apply pagination
+        const [start, end] = range;
+        const limit = Math.max(0, end - start + 1);
+        const paginatedDevices = devices.slice(start, start + limit);
+
+        res.json({
+          data: paginatedDevices,
+          total: devices.length
+        });
+        return;
+      }
+
       const col = getCollection(resource);
       const [field, order] = sort;
       const [start, end] = range;
@@ -88,6 +139,27 @@ export function createDataProviderRoutes(_mqttClient: DeviceMqttClient): Router 
       const allowed = ['devices', 'logs'];
       if (!allowed.includes(resource)) {
         res.status(404).json({ error: 'Resource not found' });
+        return;
+      }
+
+      // Special handling for devices - use MQTT client's live device registry
+      if (resource === 'devices') {
+        const device = _mqttClient.getDevice(id);
+        if (!device) {
+          res.status(404).json({ error: 'Device not found' });
+          return;
+        }
+        
+        const transformed = {
+          id: device.id,
+          deviceId: device.id,
+          clientId: device.metadata?.clientId || device.id,
+          type: device.type,
+          status: device.status,
+          lastSeen: device.lastSeen,
+          ...device.metadata,
+        };
+        res.json(transformed);
         return;
       }
 

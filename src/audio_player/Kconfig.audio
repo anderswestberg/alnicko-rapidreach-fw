@@ -31,7 +31,7 @@ config RPR_I2S_BLOCK_BUFFERS
 
 config RPR_SAMPLE_FREQ
 	  int "Sample rate"
-	  default 16000
+	  default 48000
 	  help
 	    Default sample rate (NOTE: Decoder uses actual rate from Opus file header)
 
