@@ -597,16 +597,15 @@ static bool audio_player_stream_and_decoder_init(ogg_sync_state   *oy,
     printk("SUCCESS: Header parsed OK\n");
     LOG_INF("Decoder init: checking if already configured...");
     if (DEC_Opus_IsConfigured()) {
-        LOG_ERR("Opus decoder is already configured - deinitializing first");
-        DEC_Opus_Deinit();
+        LOG_ERR("Opus decoder is already configured");
+        return false;
     }
-    
-    LOG_INF("Opus header: sample_rate=%d, channels=%d",
+    LOG_DBG("Sample_freq: %d, channel: %d",
             header.input_sample_rate,
             header.channels);
 
-    /* Use hardcoded values like the working version (commit 3c0b007) */
-    /* Opus library handles resampling automatically */
+    /* Use hardcoded 48000 Hz to match I2S configuration */
+    /* Device-server encodes all audio to 48000 Hz */
     DecConfigOpus.sample_freq = SAMPLE_FREQUENCY;  /* Fixed 48000 Hz */
     DecConfigOpus.channels    = MONO_CHANNELS;     /* Fixed 1 channel */
     DecConfigOpus.ms_frame    = DECODER_MS_FRAME;  /* 20ms frames */
@@ -618,11 +617,7 @@ static bool audio_player_stream_and_decoder_init(ogg_sync_state   *oy,
 
     LOG_DBG("dec_size: %d", dec_size);
 
-    /* Allocate 2x for decoder state + output buffer + duplication space */
     DecConfigOpus.pInternalMemory = malloc(dec_size * DUPLICATION_FACTOR);
-    LOG_INF("Allocating %u bytes for decoder (dec_size=%u, with 2x for duplication)", 
-            dec_size * DUPLICATION_FACTOR, dec_size);
-    
     if (!DecConfigOpus.pInternalMemory) {
         LOG_ERR("Decoder memory allocation failed");
         return false;

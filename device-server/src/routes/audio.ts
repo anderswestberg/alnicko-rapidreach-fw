@@ -303,9 +303,9 @@ export function createAudioRoutes(mqttClient: DeviceMqttClient): Router {
       // -compression_level 10: Best compression
       // -application voip: Optimize for speech (use 'audio' for music)
       // -ac 1: Convert to mono (saves bandwidth)
-      // -ar 16000: Sample rate 16kHz (standard for speech/VOIP)
+      // -ar 48000: Sample rate 48kHz (matches device firmware I2S/decoder config)
       // Convert to Opus format - OGG container
-      const ffmpegCommand = `ffmpeg -i "${req.file.path}" -c:a libopus -b:a 32k -vbr on -compression_level 10 -application voip -ac 1 -ar 16000 -f opus "${outputPath}" -y`;
+      const ffmpegCommand = `ffmpeg -i "${req.file.path}" -c:a libopus -b:a 32k -vbr on -compression_level 10 -application voip -ac 1 -ar 48000 -f opus "${outputPath}" -y`;
 
       logger.debug(`Executing: ${ffmpegCommand}`);
 
