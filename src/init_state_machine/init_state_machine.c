@@ -342,7 +342,7 @@ static void state_wait_network_entry(init_sm_context_t *ctx, init_event_t event)
     
 #ifdef CONFIG_RPR_MODEM_AUTO_CONNECT
     /* Try to connect modem first if Ethernet is disabled */
-    #ifndef CONFIG_RPR_ETHERNET
+    //#if !CONFIG_RPR_ETHERNET
     LOG_INF("Ethernet disabled - initializing LTE modem...");
     extern int modem_init_and_connect(void);
     int modem_ret = modem_init_and_connect();
@@ -353,7 +353,7 @@ static void state_wait_network_entry(init_sm_context_t *ctx, init_event_t event)
     } else {
         LOG_ERR("LTE modem connection failed: %d", modem_ret);
     }
-    #endif
+    //#endif
 #endif
     
     /* Check if network is already up */
