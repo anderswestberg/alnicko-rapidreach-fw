@@ -18,7 +18,6 @@
 #define MQTT_LOG_BACKEND_BUF_SIZE 256
 
 static uint8_t mqtt_log_buf[MQTT_LOG_BACKEND_BUF_SIZE];
-static uint32_t log_format_current = CONFIG_LOG_BACKEND_MQTT_OUTPUT_DEFAULT;
 
 static size_t mqtt_log_buf_pos = 0;
 
@@ -102,7 +101,7 @@ static void mqtt_log_backend_init(const struct log_backend *const backend)
 }
 
 static void mqtt_log_backend_notify(const struct log_backend *const backend,
-                                   enum log_backend_evt event, void *arg)
+                                   enum log_backend_evt event, union log_backend_evt_arg *arg)
 {
     switch (event) {
     case LOG_BACKEND_EVT_PROCESS_THREAD_DONE:
